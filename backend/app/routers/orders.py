@@ -19,9 +19,12 @@ router = APIRouter(prefix="/orders", tags=["orders"])
 async def create_order(data: OrderIn) -> Order:
     count = await db.orders.count_documents({})
     zone_id = await find_zone_for_point(data.lat, data.lng)
+    # Payout calculation: base 3.0 + 0.5 per kg
+    payout = round(3.0 + (data.weight_kg * 0.5), 2)
     order = Order(
         code=f"ORD-{count + 1:05d}",
         zone_id=zone_id,
+        payout=payout,
         **data.model_dump(),
     )
     await db.orders.insert_one(order.model_dump())

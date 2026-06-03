@@ -12,25 +12,27 @@ L.Icon.Default.mergeOptions({
 
 const SG_CENTER = [1.3521, 103.8198];
 
-const hubMarkerHtml = (color, isDefault) => {
+const hubMarkerHtml = (color, isDefault, isHighlighted = false) => {
   const ring = isDefault
     ? `box-shadow: 0 0 0 4px ${color}33, 0 2px 8px rgba(0,0,0,.3);`
     : `box-shadow: 0 0 0 2px ${color}33, 0 1px 4px rgba(0,0,0,.25);`;
   const size = isDefault ? 24 : 20;
-  return `<div style="
+  const highlightClass = isHighlighted ? "highlight-hub" : "";
+  
+  return `<div class="${highlightClass}" style="
       background:${color};
       border:3px solid #fff;
       width:${size}px;height:${size}px;
       border-radius:5px;
       transform:rotate(45deg);
-      ${ring}
+      ${isHighlighted ? '' : ring}
     "></div>`;
 };
 
-const buildHubIcon = (color = "#0d7c78", isDefault = false) =>
+const buildHubIcon = (color = "#0d7c78", isDefault = false, isHighlighted = false) =>
   L.divIcon({
     className: "",
-    html: hubMarkerHtml(color, isDefault),
+    html: hubMarkerHtml(color, isDefault, isHighlighted),
     iconSize: [isDefault ? 24 : 20, isDefault ? 24 : 20],
     iconAnchor: [isDefault ? 12 : 10, isDefault ? 12 : 10],
   });
@@ -42,7 +44,6 @@ const driverIcon = (initial = "D") =>
 
 // Traffic speed bands color
 function speedColor(band) {
-  // 1 = slowest (red) ... 8 = fast (green)
   const colors = ["#b91c1c", "#ef4444", "#f97316", "#f59e0b", "#eab308", "#84cc16", "#22c55e", "#16a34a"];
   return colors[Math.min(Math.max(band - 1, 0), 7)];
 }
@@ -52,14 +53,47 @@ export default function MapView({
   orders = [],
   drivers = [],
   zones = [],
-  routes = [],            // [{ geometry: [[lat,lng],...], color }]
+  routes = [],            // [{ geometry: [[lat,lng],...], color, driver_id }]
   incidents = [],
   speedBands = [],
   hubs = [],              // [{id, name, lat, lng, is_default}]
-  showHub = false,        // legacy: single hub at SG_CENTER
+  showHub = false,
   fitTo = null,
+  highlight = {},         // { hubId, zoneId }
+  tracking = null,        // { driver_id, location: {lat, lng} }
 }) {
   const center = SG_CENTER;
+
+  // Helper to split geometry for tracking
+  const getRouteSegments = (routeRecord) => {
+    const geometry = routeRecord.geometry || [];
+    if (!tracking || tracking.driver_id !== routeRecord.driver_id || !tracking.location || geometry.length < 2) {
+      return [{ positions: geometry, color: routeRecord.color || "#0d7c78", opacity: 0.85, weight: 4 }];
+    }
+
+    const currentLoc = [tracking.location.lat, tracking.location.lng];
+
+    // Find closest index to current tracking location
+    let closestIdx = 0;
+    let minDist = Infinity;
+    for (let i = 0; i < geometry.length; i++) {
+      const p = geometry[i];
+      const d = Math.sqrt(Math.pow(p[0] - currentLoc[0], 2) + Math.pow(p[1] - currentLoc[1], 2));
+      if (d < minDist) {
+        minDist = d;
+        closestIdx = i;
+      }
+    }
+
+    const traveled = geometry.slice(0, closestIdx + 1);
+    const remaining = geometry.slice(closestIdx);
+
+    return [
+      { positions: traveled, color: "#94a3b8", opacity: 0.4, weight: 3, key: 'traveled' },
+      { positions: remaining, color: routeRecord.color || "#0d7c78", opacity: 0.9, weight: 5, key: 'remaining' }
+    ];
+  };
+
   return (
     <div className="map-wrap" style={{ height }}>
       <MapContainer center={center} zoom={12} style={{ height: "100%", width: "100%" }} scrollWheelZoom>
@@ -76,31 +110,54 @@ export default function MapView({
           />
         ))}
 
-        {zones.map((z) => (
-          <Polygon key={z.id} positions={z.polygon} pathOptions={{ color: z.color || "#0d7c78", weight: 2, fillOpacity: 0.12 }}>
-            <LTooltip sticky>{z.name}</LTooltip>
-          </Polygon>
-        ))}
+        {zones.map((z) => {
+          const isHighlighted = (highlight.zoneIds || []).includes(z.id) || highlight.zoneId === z.id;
+          return (
+            <Polygon 
+              key={z.id} 
+              positions={z.polygon} 
+              pathOptions={{ 
+                color: z.color || "#0d7c78", 
+                weight: isHighlighted ? 4 : 2, 
+                fillOpacity: isHighlighted ? 0.25 : 0.12,
+                className: isHighlighted ? "highlight-zone" : ""
+              }}
+            >
+              <LTooltip sticky>{z.name} {isHighlighted && " (Your Zone)"}</LTooltip>
+            </Polygon>
+          );
+        })}
 
         {routes.map((r, i) => (
-          <Polyline key={`rt-${i}`} positions={r.geometry || []}
-            pathOptions={{ color: r.color || "#0d7c78", weight: 4, opacity: 0.85 }} />
+          <React.Fragment key={`rt-wrap-${i}`}>
+            {getRouteSegments(r).map((seg) => (
+              <Polyline 
+                key={`rt-${i}-seg-${seg.key || 'full'}`} 
+                positions={seg.positions}
+                pathOptions={{ color: seg.color, weight: seg.weight, opacity: seg.opacity }} 
+              />
+            ))}
+          </React.Fragment>
         ))}
 
-        {hubs.map((h) => (
-          <Marker key={h.id} position={[h.lat, h.lng]} icon={buildHubIcon(h.color || "#0d7c78", !!h.is_default)}>
-            <Popup>
-              <div style={{ fontSize: 12 }}>
-                <div style={{ fontWeight: 600 }}>
-                  <span style={{ display: "inline-block", width: 9, height: 9, background: h.color || "#0d7c78", borderRadius: 2, marginRight: 6, verticalAlign: "middle" }}></span>
-                  {h.name} {h.is_default && <span style={{ color: "#d2233c" }}>· default</span>}
+        {hubs.map((h) => {
+          const isHighlighted = highlight.hubId === h.id;
+          return (
+            <Marker key={h.id} position={[h.lat, h.lng]} icon={buildHubIcon(h.color || "#0d7c78", !!h.is_default, isHighlighted)}>
+              <Popup>
+                <div style={{ fontSize: 12 }}>
+                  <div style={{ fontWeight: 600 }}>
+                    <span style={{ display: "inline-block", width: 9, height: 9, background: h.color || "#0d7c78", borderRadius: 2, marginRight: 6, verticalAlign: "middle" }}></span>
+                    {h.name} {h.is_default && <span style={{ color: "#d2233c" }}>· default</span>}
+                    {isHighlighted && <span style={{ color: "var(--teal)", marginLeft: 6 }}>· YOUR HUB</span>}
+                  </div>
+                  {h.address && <div style={{ color: "#475569" }}>{h.address}</div>}
+                  <div style={{ color: "#64748b" }}>{h.lat.toFixed(4)}, {h.lng.toFixed(4)}</div>
                 </div>
-                {h.address && <div style={{ color: "#475569" }}>{h.address}</div>}
-                <div style={{ color: "#64748b" }}>{h.lat.toFixed(4)}, {h.lng.toFixed(4)}</div>
-              </div>
-            </Popup>
-          </Marker>
-        ))}
+              </Popup>
+            </Marker>
+          );
+        })}
 
         {showHub && hubs.length === 0 && (
           <Marker position={[1.3521, 103.8198]} icon={buildHubIcon("#d2233c", true)}>

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { http } from "../lib/api";
 import { Modal, Badge } from "../components/UI";
 import MapView from "../components/MapView";
@@ -17,7 +17,7 @@ export default function Zones() {
 
   const canMutate = user?.role === "super_admin" || user?.role === "hub_manager";
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const [z, d] = await Promise.all([http.get("/zones"), http.get("/drivers")]);
     let filteredZones = z.data;
     let filteredDrivers = d.data;
@@ -43,8 +43,9 @@ export default function Zones() {
 
     setZones(filteredZones); 
     setDrivers(filteredDrivers);
-  };
-  useEffect(() => { load(); }, [user]);
+  }, [user]);
+
+  useEffect(() => { load(); }, [load]);
 
   const openNew = () => { if (!canMutate) return; setEditing(null); setForm({ name: "", color: "#0d7c78", polygon: [] }); setOpen(true); };
   const openEdit = (z) => { if (!canMutate) return; setEditing(z); setForm({ name: z.name, color: z.color || "#0d7c78", polygon: z.polygon }); setOpen(true); };

@@ -1,175 +1,155 @@
-"""Deterministic demo dataset used to bootstrap a fresh database."""
-from __future__ import annotations
-
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Tuple
+import asyncio
+import bson
+import os
+import random
+from typing import Any, Dict, List
 
 from app.database import db
-from app.models.driver import Driver
-from app.models.hub import Hub
-from app.models.hub_manager import HubManager
-from app.models.order import Order
 from app.models.user import User
-from app.models.vehicle import Vehicle
-from app.models.zone import Zone
 from app.services.auth import hash_password
-from app.services.geo import polygon_centroid
-from app.services.zones import find_zone_for_point
+from app.utils import now_iso
 
-COLLECTIONS = ("hub_managers", "drivers", "vehicles", "zones", "orders", "clusters", "routes", "hubs", "users")
-
-HUBS: List[Tuple[str, str, float, float, bool, str]] = [
-    ("Central Hub · Queenstown", "1 Tanglin Rd, Singapore 247905", 1.3053, 103.8198, True, "#0d7c78"),
-    ("East Hub · Tampines", "10 Tampines Central, Singapore 529538", 1.3540, 103.9430, False, "#7c3aed"),
-    ("West Hub · Jurong", "1 Jurong Gateway Rd, Singapore 608549", 1.3331, 103.7426, False, "#f59e0b"),
-]
-
-HUB_MANAGERS: List[Tuple[str, str, str]] = [
-    ("Alicia Tan", "+6598000001", "Central Hub"),
-    ("Rahul Menon", "+6598000002", "East Hub"),
-]
-
-DRIVERS: List[Tuple[str, str, str]] = [
-    ("Kumar Das", "+6591110001", "A"),
-    ("Wei Ming Lee", "+6591110002", "B"),
-    ("Siti Nurhaliza", "+6591110003", "C"),
-    ("Arjun Pillai", "+6591110004", "B"),
-    ("Chen Xin", "+6591110005", "A"),
-    ("Dinesh Kumar", "+6591110006", "C"),
-]
-
-VEHICLES: List[Tuple[str, str, str, int]] = [
-    ("SGB 1001 A", "motorbike", "ev", 40),
-    ("SGB 1002 B", "motorbike", "diesel", 40),
-    ("SGV 2001 C", "van", "ev", 800),
-    ("SGV 2002 D", "van", "diesel", 1000),
-    ("SGB 1003 E", "motorbike", "ev", 40),
-    ("SGV 2003 F", "van", "ev", 800),
-]
-
-ZONES: List[Tuple[str, List[List[float]], str]] = [
-    ("Central CBD", [[1.300, 103.830], [1.300, 103.870], [1.280, 103.870], [1.280, 103.830]], "#ef4444"),
-    ("East Coast", [[1.330, 103.900], [1.330, 103.960], [1.290, 103.960], [1.290, 103.900]], "#0ea5a4"),
-    ("North-West", [[1.400, 103.740], [1.400, 103.800], [1.360, 103.800], [1.360, 103.740]], "#f59e0b"),
-]
-
-ORDERS: List[Tuple[str, str, float, float, float]] = [
-    ("10 Bayfront Ave, Singapore", "018956", 1.2837, 103.8591, 3.2),
-    ("2 Orchard Turn, Singapore", "238801", 1.3039, 103.8321, 1.5),
-    ("1 Harbourfront Walk", "098585", 1.2652, 103.8220, 5.0),
-    ("60 Airport Blvd", "819643", 1.3644, 103.9915, 2.8),
-    ("18 Marina Gardens Dr", "018953", 1.2814, 103.8642, 4.2),
-    ("9 Raffles Blvd", "039596", 1.2936, 103.8586, 1.9),
-    ("1 Stadium Pl", "397628", 1.3029, 103.8740, 2.1),
-    ("8 Sentosa Gateway", "098269", 1.2544, 103.8238, 3.7),
-    ("1 Vista Exchange Grn", "138617", 1.3072, 103.7900, 6.0),
-    ("21 Choa Chu Kang Ave 4", "689812", 1.3840, 103.7470, 2.6),
-    ("30 Woodlands Ave 2", "738343", 1.4370, 103.7865, 4.5),
-    ("50 Jurong Gateway Rd", "608549", 1.3331, 103.7426, 3.0),
-    ("1 HarbourFront Pl", "098633", 1.2653, 103.8219, 2.2),
-    ("83 Punggol Central", "828761", 1.4045, 103.9023, 1.8),
-    ("1 Pasir Ris Close", "519599", 1.3732, 103.9497, 5.3),
-]
-
+BACKUP_DIR = "mongo_backup/mongodump/test_database"
+COLLECTIONS = ("hubs", "hub_managers", "drivers", "vehicles", "zones", "orders", "clusters", "routes")
 
 async def seed_demo() -> Dict[str, Any]:
-    """Wipe and repopulate the database with deterministic demo data."""
-    for collection in COLLECTIONS:
-        await db[collection].delete_many({})
+    """Wipe and repopulate the database using BSON files from backup."""
+    results = {}
+    
+    # 1. Clear existing data
+    all_collections = COLLECTIONS + ("users",)
+    for coll in all_collections:
+        await db[coll].delete_many({})
 
-    hub_ids: List[str] = []
-    for name, address, lat, lng, is_default, color in HUBS:
-        hub = Hub(name=name, address=address, lat=lat, lng=lng, is_default=is_default, color=color)
-        await db.hubs.insert_one(hub.model_dump())
-        hub_ids.append(hub.id)
+    # 2. Insert from BSON files
+    for coll in COLLECTIONS:
+        file_path = os.path.join(BACKUP_DIR, f"{coll}.bson")
+        if not os.path.exists(file_path):
+            print(f"Warning: {file_path} not found. Skipping...")
+            results[coll] = 0
+            continue
+            
+        with open(file_path, "rb") as f:
+            data = bson.decode_all(f.read())
+            
+        if data:
+            # Strip MongoDB's internal _id to avoid conflicts
+            for doc in data:
+                if "_id" in doc:
+                    del doc["_id"]
+                
+                # Apply custom names for demo personas
+                if coll == "hub_managers" and doc["name"] == "Adrian Tan":
+                    doc["name"] = "Huy Ngo Gia"
+                if coll == "drivers" and doc["name"] == "David Lim":
+                    doc["name"] = "Huy Pham Nguyen Gia"
+                    target_hm = next((m for m in data if m.get("name") == "Huy Ngo Gia"), None)
+                    if target_hm:
+                         doc["hub_manager_id"] = target_hm["id"]
+                
+                # Apply payouts to orders from backup
+                if coll == "orders":
+                    doc["payout"] = round(3.0 + (doc.get("weight_kg", 0) * 0.5), 2)
 
-    hm_ids: List[str] = []
-    for i, (name, phone, hub_name) in enumerate(HUB_MANAGERS):
-        # Link to the seeded hub at the same index (fallback to first hub).
-        idx = min(i, len(hub_ids) - 1) if hub_ids else None
-        hub_id = hub_ids[idx] if idx is not None else None
-        seeded_hub_name = HUBS[idx][0] if idx is not None else hub_name
-        hub_manager = HubManager(name=name, phone=phone, hub_id=hub_id, hub_name=seeded_hub_name)
-        await db.hub_managers.insert_one(hub_manager.model_dump())
-        hm_ids.append(hub_manager.id)
+            await db[coll].insert_many(data)
+            results[coll] = len(data)
+        else:
+            results[coll] = 0
 
-    driver_ids: List[str] = []
-    for name, phone, license_type in DRIVERS:
-        driver = Driver(name=name, phone=phone, license_type=license_type, hub_manager_id=hm_ids[0])
-        await db.drivers.insert_one(driver.model_dump())
-        driver_ids.append(driver.id)
-
-    vehicle_ids: List[str] = []
-    for plate, vehicle_type, fuel, capacity in VEHICLES:
-        vehicle = Vehicle(plate=plate, type=vehicle_type, fuel_type=fuel, capacity_kg=capacity)
-        await db.vehicles.insert_one(vehicle.model_dump())
-        vehicle_ids.append(vehicle.id)
-
-    for driver_id, vehicle_id in zip(driver_ids, vehicle_ids):
-        await db.vehicles.update_one({"id": vehicle_id}, {"$set": {"assigned_driver_id": driver_id}})
-        await db.drivers.update_one({"id": driver_id}, {"$set": {"vehicle_id": vehicle_id}})
-
-    zone_ids: List[str] = []
-    for name, polygon, color in ZONES:
-        zone = Zone(name=name, polygon=polygon, center=polygon_centroid(polygon), color=color)
-        await db.zones.insert_one(zone.model_dump())
-        zone_ids.append(zone.id)
-
-    for index, driver_id in enumerate(driver_ids):
-        zone_id = zone_ids[index % len(zone_ids)]
-        await db.zones.update_one({"id": zone_id}, {"$addToSet": {"driver_ids": driver_id}})
-        await db.drivers.update_one({"id": driver_id}, {"$set": {"zone_id": zone_id}})
-
-    base_time = datetime.now(timezone.utc) + timedelta(hours=6)
-    # Resolve a zone for each seeded order so the Orders list reflects zones immediately.
-    seeded_zones: list[dict] = list(await db.zones.find({}, {"_id": 0}).to_list(100))
-    for index, (address, postal, lat, lng, weight) in enumerate(ORDERS):
-        order_zone = await find_zone_for_point(lat, lng, seeded_zones)
-        order = Order(
-            code=f"ORD-{index + 1:05d}",
-            address=address,
-            postal_code=postal,
-            lat=lat,
-            lng=lng,
-            weight_kg=weight,
-            required_by=(base_time + timedelta(hours=index)).isoformat(),
-            zone_id=order_zone,
+    # 3. Link Shipper to Manager and isolate the hub
+    target_hm = await db.hub_managers.find_one({"name": "Huy Ngo Gia"})
+    target_dr = await db.drivers.find_one({"name": "Huy Pham Nguyen Gia"})
+    
+    hub_id = None
+    if target_hm and target_dr:
+        hub_id = target_hm.get("hub_id")
+        # Get hub location for starting position
+        hub = await db.hubs.find_one({"id": hub_id})
+        start_loc = {"lat": hub["lat"], "lng": hub["lng"], "updated_at": now_iso()} if hub else None
+        
+        # Ensure our main shipper is linked to our main manager and has a location
+        await db.drivers.update_one(
+            {"id": target_dr["id"]}, 
+            {"$set": {"hub_manager_id": target_hm["id"], "location": start_loc, "status": "available"}}
         )
-        await db.orders.insert_one(order.model_dump())
+        
+        # Isolate: Ensure this hub ONLY has Huy Pham Nguyen Gia
+        if hub_id:
+            # Find all managers belonging to this hub
+            hub_managers = await db.hub_managers.find({"hub_id": hub_id}, {"id": 1}).to_list(100)
+            hm_ids = [m["id"] for m in hub_managers]
+            
+            # Reassign all drivers in this hub (except Huy Pham Nguyen Gia) to off_duty
+            await db.drivers.update_many(
+                {
+                    "id": {"$ne": target_dr["id"]}
+                },
+                {"$set": {"status": "off_duty"}}
+            )
 
-    # Seed Demo Users
+    # 4. Seed Demo Users
     users_to_seed = [
         User(
             email="superadmin1234@gmail.com",
             password_hash=hash_password("huy1234@"),
             role="super_admin",
-            full_name="System Administrator"
+            full_name="Nghia Nguyen Quang"
         ),
         User(
             email="manager1234@gmail.com",
             password_hash=hash_password("huy1234@"),
             role="hub_manager",
-            full_name="Alicia Tan",
-            reference_id=hm_ids[0]
+            full_name="Huy Ngo Gia",
+            reference_id=target_hm["id"] if target_hm else None
         ),
         User(
             email="shipper1234@gmail.com",
             password_hash=hash_password("huy1234@"),
             role="shipper",
-            full_name="Kumar Das",
-            reference_id=driver_ids[0]
+            full_name="Huy Pham Nguyen Gia",
+            reference_id=target_dr["id"] if target_dr else None
         )
     ]
-    for user in users_to_seed:
-        await db.users.insert_one(user.model_dump())
+    
+    user_dicts = [u.model_dump() for u in users_to_seed]
+    await db.users.insert_many(user_dicts)
+    results["users"] = len(user_dicts)
 
-    return {
-        "ok": True,
-        "hubs": len(hub_ids),
-        "hub_managers": len(hm_ids),
-        "drivers": len(driver_ids),
-        "vehicles": len(vehicle_ids),
-        "zones": len(zone_ids),
-        "orders": len(ORDERS),
-        "users": len(users_to_seed),
-    }
+    # 5. Add 3 test orders (PENDING and RANDOMIZED in Jurong area)
+    if target_dr and target_dr.get("zone_id"):
+        from app.models.order import Order
+        from datetime import datetime, timedelta, timezone
+
+        shipper_zone_id = target_dr["zone_id"]
+        
+        streets_jurong = [
+            "Jurong West St 61", "Boon Lay Way", "Jurong East St 13", 
+            "Corporation Rd", "Yuan Ching Rd", "Taman Jurong"
+        ]
+
+        test_orders = []
+        for i in range(1, 4):
+            # Randomize within Jurong pocket
+            lat = random.uniform(1.325, 1.345)
+            lng = random.uniform(103.680, 103.725)
+            weight = round(random.uniform(2.0, 15.0), 1)
+            payout = round(3.0 + (weight * 0.5), 2)
+            
+            test_orders.append(Order(
+                code=f"TEST-ORD-{i:03d}",
+                address=f"Blk {random.randint(100, 999)}, {random.choice(streets_jurong)}",
+                postal_code=f"6{random.randint(0, 9)}{random.randint(0, 9)}{random.randint(0, 9)}{random.randint(0, 9)}",
+                lat=lat, lng=lng,
+                weight_kg=weight,
+                payout=payout,
+                required_by=(datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+                status="pending", # Back to pending
+                zone_id=shipper_zone_id,
+                hub_id=hub_id
+            ))
+            
+        await db.orders.insert_many([o.model_dump() for o in test_orders])
+        results["orders"] += len(test_orders)
+
+    results["ok"] = True
+    return results

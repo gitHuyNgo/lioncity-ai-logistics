@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { http } from "./lib/api";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { TrackingProvider } from "./context/TrackingContext";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -308,16 +309,18 @@ function Shell() {
 export default function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/auth" element={<Auth />} />
-          <Route path="*" element={
-            <ProtectedRoute>
-              <Shell />
-            </ProtectedRoute>
-          } />
-        </Routes>
-      </BrowserRouter>
+      <TrackingProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/auth" element={<Auth />} />
+            <Route path="*" element={
+              <ProtectedRoute>
+                <Shell />
+              </ProtectedRoute>
+            } />
+          </Routes>
+        </BrowserRouter>
+      </TrackingProvider>
     </AuthProvider>
   );
 }

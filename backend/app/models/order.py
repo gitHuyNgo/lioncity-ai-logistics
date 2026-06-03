@@ -20,12 +20,14 @@ class Order(MongoModel):
     required_by: str
     status: OrderStatus = "pending"
     zone_id: Optional[str] = None
+    hub_id: Optional[str] = None
     cluster_id: Optional[str] = None
     driver_id: Optional[str] = None
     sequence: Optional[int] = None
     proof_photo: Optional[str] = None
     proof_signature: Optional[str] = None
     fail_reason: Optional[str] = None
+    payout: Optional[float] = None
 
 
 class OrderIn(BaseModel):

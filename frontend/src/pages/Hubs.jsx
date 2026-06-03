@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { http, fmtDate } from "../lib/api";
 import MapView from "../components/MapView";
 import HubPicker from "../components/HubPicker";
@@ -15,7 +15,7 @@ export default function Hubs() {
 
   const isAdmin = user?.role === "super_admin";
 
-  const load = async () => { 
+  const load = useCallback(async () => { 
     const r = await http.get("/hubs");
     let filteredHubs = r.data;
 
@@ -37,8 +37,9 @@ export default function Hubs() {
        }
     }
     setHubs(filteredHubs); 
-  };
-  useEffect(() => { load(); }, [user]);
+  }, [user]);
+
+  useEffect(() => { load(); }, [load]);
 
   const openNew = () => {
     if (!isAdmin) return;
