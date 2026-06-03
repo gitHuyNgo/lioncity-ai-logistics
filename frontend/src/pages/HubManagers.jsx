@@ -52,7 +52,6 @@ export default function HubManagers() {
   return (
     <div>
       <div className="page-title"><span className="accent"></span>Hub Managers</div>
-      <div className="page-subtitle">FR-01 · FR-02 — Manage hub managers and their operational status</div>
 
       <div className="toolbar">
         <button className="btn primary" data-testid="add-hub-manager-btn" onClick={openNew}>+ Add Hub Manager</button>

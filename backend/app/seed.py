@@ -9,12 +9,14 @@ from app.models.driver import Driver
 from app.models.hub import Hub
 from app.models.hub_manager import HubManager
 from app.models.order import Order
+from app.models.user import User
 from app.models.vehicle import Vehicle
 from app.models.zone import Zone
+from app.services.auth import hash_password
 from app.services.geo import polygon_centroid
 from app.services.zones import find_zone_for_point
 
-COLLECTIONS = ("hub_managers", "drivers", "vehicles", "zones", "orders", "clusters", "routes", "hubs")
+COLLECTIONS = ("hub_managers", "drivers", "vehicles", "zones", "orders", "clusters", "routes", "hubs", "users")
 
 HUBS: List[Tuple[str, str, float, float, bool, str]] = [
     ("Central Hub · Queenstown", "1 Tanglin Rd, Singapore 247905", 1.3053, 103.8198, True, "#0d7c78"),
@@ -135,6 +137,32 @@ async def seed_demo() -> Dict[str, Any]:
         )
         await db.orders.insert_one(order.model_dump())
 
+    # Seed Demo Users
+    users_to_seed = [
+        User(
+            email="superadmin1234@gmail.com",
+            password_hash=hash_password("huy1234@"),
+            role="super_admin",
+            full_name="System Administrator"
+        ),
+        User(
+            email="manager1234@gmail.com",
+            password_hash=hash_password("huy1234@"),
+            role="hub_manager",
+            full_name="Alicia Tan",
+            reference_id=hm_ids[0]
+        ),
+        User(
+            email="shipper1234@gmail.com",
+            password_hash=hash_password("huy1234@"),
+            role="shipper",
+            full_name="Kumar Das",
+            reference_id=driver_ids[0]
+        )
+    ]
+    for user in users_to_seed:
+        await db.users.insert_one(user.model_dump())
+
     return {
         "ok": True,
         "hubs": len(hub_ids),
@@ -143,4 +171,5 @@ async def seed_demo() -> Dict[str, Any]:
         "vehicles": len(vehicle_ids),
         "zones": len(zone_ids),
         "orders": len(ORDERS),
+        "users": len(users_to_seed),
     }

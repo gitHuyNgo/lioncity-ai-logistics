@@ -2,8 +2,10 @@ import React, { useEffect, useState } from "react";
 import { http, fmtDate, fmtDist, fmtDur } from "../lib/api";
 import MapView from "../components/MapView";
 import { Badge, Modal } from "../components/UI";
+import { useAuth } from "../context/AuthContext";
 
 export default function Shipper() {
+  const { user } = useAuth();
   const [drivers, setDrivers] = useState([]);
   const [driverId, setDriverId] = useState("");
   const [payload, setPayload] = useState(null);
@@ -15,7 +17,13 @@ export default function Shipper() {
   const load = async () => {
     const d = await http.get("/drivers");
     setDrivers(d.data);
-    if (!driverId && d.data.length) setDriverId(d.data[0].id);
+    
+    // If user is a shipper, lock the driverId to their reference_id
+    if (user?.role === "shipper" && user.reference_id) {
+      setDriverId(user.reference_id);
+    } else if (!driverId && d.data.length) {
+      setDriverId(d.data[0].id);
+    }
   };
   const loadOrders = async () => {
     if (!driverId) return;
@@ -24,7 +32,7 @@ export default function Shipper() {
     const all = await http.get("/orders", { params: { driver_id: driverId } });
     setOrders(all.data);
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [user]);
   useEffect(() => { loadOrders(); const t = setInterval(loadOrders, 5000); return () => clearInterval(t); }, [driverId]);
 
   const setStatus = async (status) => { await http.put(`/drivers/${driverId}/status`, { status }); load(); };
@@ -41,14 +49,19 @@ export default function Shipper() {
 
   return (
     <div>
-      <div className="page-title"><span className="accent"></span>Shipper Cockpit</div>
-      <div className="page-subtitle">FR-05 · FR-14 · FR-18 · FR-19 · FR-20 — Driver's view of route, live location and delivery updates</div>
+      <div className="page-title"><span className="accent"></span>{user?.role === "shipper" ? "My Dashboard" : "Shipper Cockpit"}</div>
 
       <div className="toolbar">
-        <select className="select" style={{ width: 240 }} data-testid="shipper-driver-select"
-          value={driverId} onChange={e => setDriverId(e.target.value)}>
-          {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-        </select>
+        {user?.role !== "shipper" ? (
+          <select className="select" style={{ width: 240 }} data-testid="shipper-driver-select"
+            value={driverId} onChange={e => setDriverId(e.target.value)}>
+            {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
+        ) : (
+          <div style={{ fontWeight: 600, fontSize: 18, color: "var(--teal-ink)" }}>
+            {driver?.name || "Driver Profile"}
+          </div>
+        )}
         {driver && (
           <>
             <select className="select" style={{ width: 160 }} data-testid="shipper-status"

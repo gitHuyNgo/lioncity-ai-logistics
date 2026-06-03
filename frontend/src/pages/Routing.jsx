@@ -65,7 +65,6 @@ export default function Routing() {
   return (
     <div>
       <div className="page-title"><span className="accent"></span>Route Planning</div>
-      <div className="page-subtitle">FR-17 · FR-18 · FR-19 — Optimal routing, live GPS and delivery sequence</div>
 
       <div className="toolbar">
         <select className="select" style={{ width: 240 }} data-testid="routing-driver"

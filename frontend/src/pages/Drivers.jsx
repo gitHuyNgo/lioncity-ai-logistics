@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { http } from "../lib/api";
 import { Modal, Badge } from "../components/UI";
+import { useAuth } from "../context/AuthContext";
 
 export default function Drivers() {
+  const { user } = useAuth();
   const [drivers, setDrivers] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [zones, setZones] = useState([]);
@@ -11,16 +13,38 @@ export default function Drivers() {
   const [open, setOpen] = useState(false);
   const [err, setErr] = useState("");
 
+  const canMutate = user?.role === "super_admin" || user?.role === "hub_manager";
+
   const load = async () => {
     const [d, v, z] = await Promise.all([http.get("/drivers"), http.get("/vehicles"), http.get("/zones")]);
-    setDrivers(d.data); setVehicles(v.data); setZones(z.data);
-  };
-  useEffect(() => { load(); }, []);
+    let filteredDrivers = d.data;
 
-  const openNew = () => { setEditing(null); setForm({ name: "", phone: "", license_type: "B", zone_id: "" }); setOpen(true); setErr(""); };
-  const openEdit = (d) => { setEditing(d); setForm({ name: d.name, phone: d.phone, license_type: d.license_type, zone_id: d.zone_id || "" }); setOpen(true); setErr(""); };
+    if (user?.role === "hub_manager" && user.reference_id) {
+       const hmRes = await http.get("/hub-managers");
+       const manager = hmRes.data.find(m => m.id === user.reference_id);
+       if (manager) {
+         filteredDrivers = d.data.filter(dr => dr.hub_manager_id === manager.id);
+       }
+    } else if (user?.role === "shipper" && user.reference_id) {
+       const driver = d.data.find(dr => dr.id === user.reference_id);
+       if (driver && driver.zone_id) {
+         filteredDrivers = d.data.filter(dr => dr.zone_id === driver.zone_id);
+       } else {
+         filteredDrivers = d.data.filter(dr => dr.id === user.reference_id);
+       }
+    }
+
+    setDrivers(filteredDrivers); 
+    setVehicles(v.data); 
+    setZones(z.data);
+  };
+  useEffect(() => { load(); }, [user]);
+
+  const openNew = () => { if (!canMutate) return; setEditing(null); setForm({ name: "", phone: "", license_type: "B", zone_id: "" }); setOpen(true); setErr(""); };
+  const openEdit = (d) => { if (!canMutate) return; setEditing(d); setForm({ name: d.name, phone: d.phone, license_type: d.license_type, zone_id: d.zone_id || "" }); setOpen(true); setErr(""); };
 
   const save = async () => {
+    if (!canMutate) return;
     try {
       setErr("");
       const payload = { ...form, zone_id: form.zone_id || null };
@@ -29,43 +53,56 @@ export default function Drivers() {
       setOpen(false); load();
     } catch (e) { setErr(e.response?.data?.detail || "Error"); }
   };
-  const setStatus = async (d, status) => { await http.put(`/drivers/${d.id}/status`, { status }); load(); };
-  const remove = async (id) => { if (!window.confirm("Delete this driver?")) return; await http.delete(`/drivers/${id}`); load(); };
+  const setStatus = async (d, status) => { 
+    // Drivers can only update their own status if role is shipper
+    if (user?.role === "shipper" && d.id !== user.reference_id) return;
+    await http.put(`/drivers/${d.id}/status`, { status }); load(); 
+  };
+  const remove = async (id) => { 
+    if (!canMutate) return;
+    if (!window.confirm("Delete this driver?")) return; 
+    await http.delete(`/drivers/${id}`); load(); 
+  };
 
   const vById = Object.fromEntries(vehicles.map(v => [v.id, v]));
   const zById = Object.fromEntries(zones.map(z => [z.id, z]));
 
   return (
     <div>
-      <div className="page-title"><span className="accent"></span>Drivers</div>
-      <div className="page-subtitle">FR-03 · FR-04 · FR-05 — Manage drivers, their zone, fleet vehicle and status</div>
+      <div className="page-title"><span className="accent"></span>{user?.role === "shipper" ? "Team & Colleagues" : "Shipper Management"}</div>
 
       <div className="toolbar">
-        <button className="btn primary" data-testid="add-driver-btn" onClick={openNew}>+ Add Driver</button>
+        {canMutate && <button className="btn primary" data-testid="add-driver-btn" onClick={openNew}>+ Add Driver</button>}
       </div>
 
       <div className="card" style={{ padding: 0 }}>
         <table className="tbl" data-testid="drivers-table">
           <thead><tr>
-            <th>Name</th><th>Phone</th><th>License</th><th>Status</th><th>Assigned Fleet</th><th>Zone</th><th></th>
+            <th>Name</th><th>Phone</th><th>License</th><th>Status</th><th>Assigned Fleet</th><th>Zone</th>{canMutate && <th></th>}
           </tr></thead>
           <tbody>
             {drivers.map(d => {
               const veh = d.vehicle_id ? vById[d.vehicle_id] : null;
               const zone = d.zone_id ? zById[d.zone_id] : null;
+              const isSelf = user?.reference_id === d.id;
+              
               return (
-                <tr key={d.id}>
-                  <td style={{ fontWeight: 500 }}>{d.name}</td>
+                <tr key={d.id} style={isSelf ? { background: "var(--teal-ink)08" } : {}}>
+                  <td style={{ fontWeight: 500 }}>{d.name} {isSelf && <Badge tone="teal" style={{ marginLeft: 6 }}>You</Badge>}</td>
                   <td className="muted">{d.phone}</td>
                   <td>{d.license_type}</td>
                   <td>
-                    <select className="select" style={{ height: 28, padding: "0 8px", fontSize: 12 }}
-                      data-testid={`driver-status-${d.id}`}
-                      value={d.status} onChange={(e) => setStatus(d, e.target.value)}>
-                      <option value="available">Available</option>
-                      <option value="delivering">Delivering</option>
-                      <option value="off_duty">Off-duty</option>
-                    </select>
+                    {canMutate || isSelf ? (
+                      <select className="select" style={{ height: 28, padding: "0 8px", fontSize: 12 }}
+                        data-testid={`driver-status-${d.id}`}
+                        value={d.status} onChange={(e) => setStatus(d, e.target.value)}>
+                        <option value="available">Available</option>
+                        <option value="delivering">Delivering</option>
+                        <option value="off_duty">Off-duty</option>
+                      </select>
+                    ) : (
+                      <Badge tone={d.status}>{d.status}</Badge>
+                    )}
                   </td>
                   <td>
                     {veh ? (
@@ -87,14 +124,16 @@ export default function Drivers() {
                       </span>
                     ) : <span className="muted">—</span>}
                   </td>
-                  <td style={{ textAlign: "right" }}>
-                    <button className="btn sm ghost" onClick={() => openEdit(d)} data-testid={`edit-driver-${d.id}`}>Edit</button>
-                    <button className="btn sm ghost" style={{ color: "#b91c1c" }} onClick={() => remove(d.id)} data-testid={`del-driver-${d.id}`}>Delete</button>
-                  </td>
+                  {canMutate && (
+                    <td style={{ textAlign: "right" }}>
+                      <button className="btn sm ghost" onClick={() => openEdit(d)} data-testid={`edit-driver-${d.id}`}>Edit</button>
+                      <button className="btn sm ghost" style={{ color: "#b91c1c" }} onClick={() => remove(d.id)} data-testid={`del-driver-${d.id}`}>Delete</button>
+                    </td>
+                  )}
                 </tr>
               );
             })}
-            {drivers.length === 0 && <tr><td colSpan={7} style={{ padding: 24, textAlign: "center", color: "#64748b" }}>No drivers.</td></tr>}
+            {drivers.length === 0 && <tr><td colSpan={canMutate ? 7 : 6} style={{ padding: 24, textAlign: "center", color: "#64748b" }}>No drivers.</td></tr>}
           </tbody>
         </table>
       </div>

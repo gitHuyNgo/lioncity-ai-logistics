@@ -3,16 +3,21 @@ from __future__ import annotations
 
 from typing import List
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.database import db
 from app.models.driver import Driver, DriverIn, DriverStatusIn, LocationIn
+from app.services.auth import check_role, get_current_user
 from app.utils import find_list, find_one, now_iso, unique_phone
 
-router = APIRouter(prefix="/drivers", tags=["drivers"])
+router = APIRouter(
+    prefix="/drivers", 
+    tags=["drivers"],
+    dependencies=[Depends(get_current_user)]
+)
 
 
-@router.post("", response_model=Driver)
+@router.post("", response_model=Driver, dependencies=[Depends(check_role(["super_admin", "hub_manager"]))])
 async def create_driver(data: DriverIn) -> Driver:
     if not await unique_phone("drivers", data.phone):
         raise HTTPException(status_code=400, detail="Phone already exists")
@@ -46,7 +51,7 @@ async def list_driver_locations() -> List[dict]:
     ]
 
 
-@router.put("/{driver_id}", response_model=Driver)
+@router.put("/{driver_id}", response_model=Driver, dependencies=[Depends(check_role(["super_admin", "hub_manager"]))])
 async def update_driver(driver_id: str, data: DriverIn) -> dict:
     if not await unique_phone("drivers", data.phone, exclude_id=driver_id):
         raise HTTPException(status_code=400, detail="Phone already exists")
@@ -72,7 +77,7 @@ async def update_driver(driver_id: str, data: DriverIn) -> dict:
     return res
 
 
-@router.delete("/{driver_id}")
+@router.delete("/{driver_id}", dependencies=[Depends(check_role(["super_admin", "hub_manager"]))])
 async def delete_driver(driver_id: str) -> dict:
     await db.vehicles.update_many(
         {"assigned_driver_id": driver_id},

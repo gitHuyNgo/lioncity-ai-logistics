@@ -3,16 +3,22 @@ from __future__ import annotations
 
 from typing import List
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.database import db
 from app.models.hub import Hub, HubIn
+from app.services.auth import check_role, get_current_user
 from app.utils import find_list, find_one
 
 router = APIRouter(prefix="/hubs", tags=["hubs"])
 
 
-@router.post("", response_model=Hub)
+@router.get("", response_model=List[Hub], dependencies=[Depends(get_current_user)])
+async def list_hubs() -> List[dict]:
+    return await find_list("hubs")
+
+
+@router.post("", response_model=Hub, dependencies=[Depends(check_role(["super_admin"]))])
 async def create_hub(data: HubIn) -> Hub:
     hub = Hub(**data.model_dump())
     if hub.is_default:
@@ -24,12 +30,7 @@ async def create_hub(data: HubIn) -> Hub:
     return hub
 
 
-@router.get("", response_model=List[Hub])
-async def list_hubs() -> List[dict]:
-    return await find_list("hubs")
-
-
-@router.put("/{hub_id}", response_model=Hub)
+@router.put("/{hub_id}", response_model=Hub, dependencies=[Depends(check_role(["super_admin"]))])
 async def update_hub(hub_id: str, data: HubIn) -> dict:
     if data.is_default:
         await db.hubs.update_many({"id": {"$ne": hub_id}}, {"$set": {"is_default": False}})
@@ -44,7 +45,7 @@ async def update_hub(hub_id: str, data: HubIn) -> dict:
     return res
 
 
-@router.delete("/{hub_id}")
+@router.delete("/{hub_id}", dependencies=[Depends(check_role(["super_admin"]))])
 async def delete_hub(hub_id: str) -> dict:
     target = await find_one("hubs", {"id": hub_id})
     if not target:

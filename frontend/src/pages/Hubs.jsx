@@ -3,24 +3,52 @@ import { http, fmtDate } from "../lib/api";
 import MapView from "../components/MapView";
 import HubPicker from "../components/HubPicker";
 import { Modal, Badge } from "../components/UI";
+import { useAuth } from "../context/AuthContext";
 
 export default function Hubs() {
+  const { user } = useAuth();
   const [hubs, setHubs] = useState([]);
   const [editing, setEditing] = useState(null);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ name: "", address: "", lat: 1.3521, lng: 103.8198, is_default: false, color: "#0d7c78", notes: "" });
   const [geo, setGeo] = useState({ q: "", busy: false, results: [], error: "" });
 
-  const load = async () => { const r = await http.get("/hubs"); setHubs(r.data); };
-  useEffect(() => { load(); }, []);
+  const isAdmin = user?.role === "super_admin";
+
+  const load = async () => { 
+    const r = await http.get("/hubs");
+    let filteredHubs = r.data;
+
+    if (user?.role === "hub_manager" && user.reference_id) {
+       const hmRes = await http.get("/hub-managers");
+       const manager = hmRes.data.find(m => m.id === user.reference_id);
+       if (manager && manager.hub_id) {
+         filteredHubs = r.data.filter(h => h.id === manager.hub_id);
+       }
+    } else if (user?.role === "shipper" && user.reference_id) {
+       const drRes = await http.get("/drivers");
+       const driver = drRes.data.find(d => d.id === user.reference_id);
+       if (driver && driver.hub_manager_id) {
+         const hmRes = await http.get("/hub-managers");
+         const manager = hmRes.data.find(m => m.id === driver.hub_manager_id);
+         if (manager && manager.hub_id) {
+           filteredHubs = r.data.filter(h => h.id === manager.hub_id);
+         }
+       }
+    }
+    setHubs(filteredHubs); 
+  };
+  useEffect(() => { load(); }, [user]);
 
   const openNew = () => {
+    if (!isAdmin) return;
     setEditing(null);
     setForm({ name: "", address: "", lat: 1.3521, lng: 103.8198, is_default: hubs.length === 0, color: "#0d7c78", notes: "" });
     setGeo({ q: "", busy: false, results: [], error: "" });
     setOpen(true);
   };
   const openEdit = (h) => {
+    if (!isAdmin) return;
     setEditing(h);
     setForm({ name: h.name, address: h.address || "", lat: h.lat, lng: h.lng, is_default: !!h.is_default, color: h.color || "#0d7c78", notes: h.notes || "" });
     setGeo({ q: "", busy: false, results: [], error: "" });
@@ -28,13 +56,20 @@ export default function Hubs() {
   };
 
   const save = async () => {
-    if (!form.name) return;
+    if (!form.name || !isAdmin) return;
     if (editing) await http.put(`/hubs/${editing.id}`, form);
     else await http.post("/hubs", form);
     setOpen(false); load();
   };
-  const remove = async (h) => { if (!window.confirm(`Delete hub "${h.name}"?`)) return; await http.delete(`/hubs/${h.id}`); load(); };
-  const makeDefault = async (h) => { await http.put(`/hubs/${h.id}`, { ...h, is_default: true }); load(); };
+  const remove = async (h) => { 
+    if (!isAdmin) return;
+    if (!window.confirm(`Delete hub "${h.name}"?`)) return; 
+    await http.delete(`/hubs/${h.id}`); load(); 
+  };
+  const makeDefault = async (h) => { 
+    if (!isAdmin) return;
+    await http.put(`/hubs/${h.id}`, { ...h, is_default: true }); load(); 
+  };
 
   const geocode = async () => {
     if (!geo.q || geo.q.length < 3) return;
@@ -55,22 +90,23 @@ export default function Hubs() {
 
   return (
     <div>
-      <div className="page-title"><span className="accent"></span>Hubs</div>
-      <div className="page-subtitle">Multiple hub locations · Click a row or the map to add / edit / relocate</div>
+      <div className="page-title"><span className="accent"></span>{isAdmin ? "Hubs Management" : "Assigned Hub"}</div>
 
       <div className="toolbar">
-        <button className="btn primary" data-testid="add-hub-btn" onClick={openNew}>+ Add Hub</button>
-        <span className="muted" style={{ fontSize: 12 }}>Default hub is used by route planning & auto-assignment.</span>
+        {isAdmin && <button className="btn primary" data-testid="add-hub-btn" onClick={openNew}>+ Add Hub</button>}
+        {isAdmin && <span className="muted" style={{ fontSize: 12 }}>Default hub is used by route planning & auto-assignment.</span>}
       </div>
 
       <div className="section">
-        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-          <MapView height={520} hubs={hubs} />
+        <div className="card" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+          <div style={{ flex: 1, minHeight: 520 }}>
+            <MapView height="100%" hubs={hubs} />
+          </div>
         </div>
 
         <div className="card" style={{ padding: 0, maxHeight: 620, overflow: "auto" }}>
           <table className="tbl" data-testid="hubs-table">
-            <thead><tr><th>Name</th><th>Address / Coords</th><th>Default</th><th></th></tr></thead>
+            <thead><tr><th>Name</th><th>Address / Coords</th><th>Status</th>{isAdmin && <th></th>}</tr></thead>
             <tbody>
               {hubs.map(h => (
                 <tr key={h.id}>
@@ -85,15 +121,20 @@ export default function Hubs() {
                     <div>{h.address || <span className="muted">No address</span>}</div>
                     <div className="muted">{h.lat.toFixed(4)}, {h.lng.toFixed(4)}</div>
                   </td>
-                  <td>{h.is_default ? <Badge tone="ev">Default</Badge> :
-                    <button className="btn sm ghost" onClick={() => makeDefault(h)} data-testid={`set-default-hub-${h.id}`}>Set default</button>}</td>
-                  <td style={{ textAlign: "right" }}>
-                    <button className="btn sm ghost" onClick={() => openEdit(h)} data-testid={`edit-hub-${h.id}`}>Edit</button>
-                    <button className="btn sm ghost" style={{ color: "#b91c1c" }} onClick={() => remove(h)} data-testid={`del-hub-${h.id}`}>Delete</button>
+                  <td>
+                    {h.is_default ? <Badge tone="ev">Default</Badge> : (
+                      isAdmin ? <button className="btn sm ghost" onClick={() => makeDefault(h)} data-testid={`set-default-hub-${h.id}`}>Set default</button> : "Active"
+                    )}
                   </td>
+                  {isAdmin && (
+                    <td style={{ textAlign: "right" }}>
+                      <button className="btn sm ghost" onClick={() => openEdit(h)} data-testid={`edit-hub-${h.id}`}>Edit</button>
+                      <button className="btn sm ghost" style={{ color: "#b91c1c" }} onClick={() => remove(h)} data-testid={`del-hub-${h.id}`}>Delete</button>
+                    </td>
+                  )}
                 </tr>
               ))}
-              {hubs.length === 0 && <tr><td colSpan={4} style={{ padding: 24, textAlign: "center", color: "#64748b" }}>No hubs yet. Add your first hub.</td></tr>}
+              {hubs.length === 0 && <tr><td colSpan={isAdmin ? 4 : 3} style={{ padding: 24, textAlign: "center", color: "#64748b" }}>No hubs yet. Add your first hub.</td></tr>}
             </tbody>
           </table>
         </div>
