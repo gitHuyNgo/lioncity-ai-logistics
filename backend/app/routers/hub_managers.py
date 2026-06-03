@@ -3,13 +3,19 @@ from __future__ import annotations
 
 from typing import List
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.database import db
 from app.models.hub_manager import HubManager, HubManagerIn
+from app.services.auth import check_role, get_current_user
 from app.utils import find_list, find_one, unique_phone
 
 router = APIRouter(prefix="/hub-managers", tags=["hub-managers"])
+
+
+@router.get("", response_model=List[HubManager], dependencies=[Depends(get_current_user)])
+async def list_hub_managers() -> List[dict]:
+    return await find_list("hub_managers")
 
 
 async def _resolve_hub(data: HubManagerIn) -> tuple[str | None, str | None]:
@@ -22,7 +28,7 @@ async def _resolve_hub(data: HubManagerIn) -> tuple[str | None, str | None]:
     return hub["id"], hub.get("name")
 
 
-@router.post("", response_model=HubManager)
+@router.post("", response_model=HubManager, dependencies=[Depends(check_role(["super_admin"]))])
 async def create_hub_manager(data: HubManagerIn) -> HubManager:
     if not await unique_phone("hub_managers", data.phone):
         raise HTTPException(status_code=400, detail="Phone already exists")
@@ -35,12 +41,7 @@ async def create_hub_manager(data: HubManagerIn) -> HubManager:
     return hub_manager
 
 
-@router.get("", response_model=List[HubManager])
-async def list_hub_managers() -> List[dict]:
-    return await find_list("hub_managers")
-
-
-@router.put("/{hm_id}", response_model=HubManager)
+@router.put("/{hm_id}", response_model=HubManager, dependencies=[Depends(check_role(["super_admin"]))])
 async def update_hub_manager(hm_id: str, data: HubManagerIn) -> dict:
     if not await unique_phone("hub_managers", data.phone, exclude_id=hm_id):
         raise HTTPException(status_code=400, detail="Phone already exists")
@@ -59,7 +60,7 @@ async def update_hub_manager(hm_id: str, data: HubManagerIn) -> dict:
     return res
 
 
-@router.delete("/{hm_id}")
+@router.delete("/{hm_id}", dependencies=[Depends(check_role(["super_admin"]))])
 async def delete_hub_manager(hm_id: str) -> dict:
     await db.hub_managers.delete_one({"id": hm_id})
     return {"ok": True}

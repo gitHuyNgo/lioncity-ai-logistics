@@ -3,8 +3,10 @@ import { http } from "../lib/api";
 import { Modal, Badge } from "../components/UI";
 import MapView from "../components/MapView";
 import PolygonEditor from "../components/PolygonEditor";
+import { useAuth } from "../context/AuthContext";
 
 export default function Zones() {
+  const { user } = useAuth();
   const [zones, setZones] = useState([]);
   const [drivers, setDrivers] = useState([]);
   const [open, setOpen] = useState(false);
@@ -13,27 +15,58 @@ export default function Zones() {
   const [assignOpen, setAssignOpen] = useState(null);
   const [assignDriverId, setAssignDriverId] = useState("");
 
+  const canMutate = user?.role === "super_admin" || user?.role === "hub_manager";
+
   const load = async () => {
     const [z, d] = await Promise.all([http.get("/zones"), http.get("/drivers")]);
-    setZones(z.data); setDrivers(d.data);
-  };
-  useEffect(() => { load(); }, []);
+    let filteredZones = z.data;
+    let filteredDrivers = d.data;
 
-  const openNew = () => { setEditing(null); setForm({ name: "", color: "#0d7c78", polygon: [] }); setOpen(true); };
-  const openEdit = (z) => { setEditing(z); setForm({ name: z.name, color: z.color || "#0d7c78", polygon: z.polygon }); setOpen(true); };
+    if (user?.role === "hub_manager" && user.reference_id) {
+       const hmRes = await http.get("/hub-managers");
+       const manager = hmRes.data.find(m => m.id === user.reference_id);
+       if (manager) {
+         filteredDrivers = d.data.filter(dr => dr.hub_manager_id === manager.id);
+         const driverIds = filteredDrivers.map(dr => dr.id);
+         // Filter zones that have at least one driver from this hub
+         filteredZones = z.data.filter(zone => zone.driver_ids.some(did => driverIds.includes(did)));
+       }
+    } else if (user?.role === "shipper" && user.reference_id) {
+       const driver = d.data.find(dr => dr.id === user.reference_id);
+       if (driver && driver.zone_id) {
+         filteredZones = z.data.filter(zone => zone.id === driver.zone_id);
+       } else {
+         filteredZones = [];
+       }
+       filteredDrivers = d.data.filter(dr => dr.id === user.reference_id);
+    }
+
+    setZones(filteredZones); 
+    setDrivers(filteredDrivers);
+  };
+  useEffect(() => { load(); }, [user]);
+
+  const openNew = () => { if (!canMutate) return; setEditing(null); setForm({ name: "", color: "#0d7c78", polygon: [] }); setOpen(true); };
+  const openEdit = (z) => { if (!canMutate) return; setEditing(z); setForm({ name: z.name, color: z.color || "#0d7c78", polygon: z.polygon }); setOpen(true); };
 
   const save = async () => {
-    if (!form.name || form.polygon.length < 3) return;
+    if (!form.name || form.polygon.length < 3 || !canMutate) return;
     if (editing) await http.put(`/zones/${editing.id}`, { name: form.name, polygon: form.polygon, color: form.color });
     else await http.post("/zones", { name: form.name, polygon: form.polygon, color: form.color });
     setOpen(false); load();
   };
-  const remove = async (z) => { if (!window.confirm(`Delete zone ${z.name}?`)) return; await http.delete(`/zones/${z.id}`); load(); };
+  const remove = async (z) => { 
+    if (!canMutate) return;
+    if (!window.confirm(`Delete zone ${z.name}?`)) return; 
+    await http.delete(`/zones/${z.id}`); load(); 
+  };
   const assign = async () => {
+    if (!canMutate) return;
     await http.post(`/zones/${assignOpen.id}/assign-driver`, { driver_id: assignDriverId });
     setAssignOpen(null); setAssignDriverId(""); load();
   };
   const unassign = async (zone, driverId) => {
+    if (!canMutate) return;
     await http.post(`/zones/${zone.id}/unassign-driver`, { driver_id: driverId }); load();
   };
 
@@ -41,11 +74,10 @@ export default function Zones() {
 
   return (
     <div>
-      <div className="page-title"><span className="accent"></span>Zones</div>
-      <div className="page-subtitle">FR-09 · FR-10 · FR-11 — Trace zones on the map, assign drivers, visualize coverage</div>
+      <div className="page-title"><span className="accent"></span>{user?.role === "shipper" ? "My Delivery Zone" : "Zone Management"}</div>
 
       <div className="toolbar">
-        <button className="btn primary" data-testid="add-zone-btn" onClick={openNew}>+ Draw New Zone</button>
+        {canMutate && <button className="btn primary" data-testid="add-zone-btn" onClick={openNew}>+ Draw New Zone</button>}
       </div>
 
       <div className="section">
@@ -58,7 +90,7 @@ export default function Zones() {
 
         <div className="card" style={{ padding: 0, maxHeight: 620, overflow: "auto" }}>
           <table className="tbl" data-testid="zones-table">
-            <thead><tr><th>Zone</th><th>Drivers</th><th></th></tr></thead>
+            <thead><tr><th>Zone</th><th>Drivers</th>{canMutate && <th></th>}</tr></thead>
             <tbody>
               {zones.map(z => (
                 <tr key={z.id}>
@@ -76,19 +108,21 @@ export default function Zones() {
                     {z.driver_ids.map(did => (
                       <span className="chip" key={did}>
                         {dById[did]?.name || "driver"}
-                        <button className="btn sm ghost" style={{ height: 18, padding: "0 4px", fontSize: 10 }}
-                          onClick={() => unassign(z, did)} data-testid={`unassign-driver-${did}`}>×</button>
+                        {canMutate && <button className="btn sm ghost" style={{ height: 18, padding: "0 4px", fontSize: 10 }}
+                          onClick={() => unassign(z, did)} data-testid={`unassign-driver-${did}`}>×</button>}
                       </span>
                     ))}
                   </td>
-                  <td style={{ textAlign: "right" }}>
-                    <button className="btn sm" data-testid={`assign-zone-${z.id}`} onClick={() => { setAssignOpen(z); setAssignDriverId(""); }}>+ Driver</button>
-                    <button className="btn sm ghost" onClick={() => openEdit(z)} data-testid={`edit-zone-${z.id}`}>Edit</button>
-                    <button className="btn sm ghost" style={{ color: "#b91c1c" }} onClick={() => remove(z)} data-testid={`del-zone-${z.id}`}>Delete</button>
-                  </td>
+                  {canMutate && (
+                    <td style={{ textAlign: "right" }}>
+                      <button className="btn sm" data-testid={`assign-zone-${z.id}`} onClick={() => { setAssignOpen(z); setAssignDriverId(""); }}>+ Driver</button>
+                      <button className="btn sm ghost" onClick={() => openEdit(z)} data-testid={`edit-zone-${z.id}`}>Edit</button>
+                      <button className="btn sm ghost" style={{ color: "#b91c1c" }} onClick={() => remove(z)} data-testid={`del-zone-${z.id}`}>Delete</button>
+                    </td>
+                  )}
                 </tr>
               ))}
-              {zones.length === 0 && <tr><td colSpan={3} style={{ padding: 24, textAlign: "center", color: "#64748b" }}>No zones. Draw your first one.</td></tr>}
+              {zones.length === 0 && <tr><td colSpan={canMutate ? 3 : 2} style={{ padding: 24, textAlign: "center", color: "#64748b" }}>{user?.role === "shipper" ? "No zone assigned yet." : "No zones."}</td></tr>}
             </tbody>
           </table>
         </div>

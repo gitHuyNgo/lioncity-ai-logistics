@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.routers import (
+    auth,
     clusters,
     drivers,
     hub_managers,
@@ -18,6 +19,7 @@ from app.routers import (
 )
 
 api_router = APIRouter(prefix="/api")
+api_router.include_router(auth.router)
 api_router.include_router(meta.router)
 api_router.include_router(hubs.router)
 api_router.include_router(hub_managers.router)

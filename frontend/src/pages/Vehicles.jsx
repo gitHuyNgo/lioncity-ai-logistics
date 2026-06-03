@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { http } from "../lib/api";
 import { Modal, Badge } from "../components/UI";
+import { useAuth } from "../context/AuthContext";
 
 export default function Vehicles() {
+  const { user } = useAuth();
   const [vehicles, setVehicles] = useState([]);
   const [drivers, setDrivers] = useState([]);
   const [form, setForm] = useState({ plate: "", type: "van", fuel_type: "ev", capacity_kg: 500 });
@@ -10,17 +12,41 @@ export default function Vehicles() {
   const [assignOpen, setAssignOpen] = useState(null); // vehicle
   const [assignDriverId, setAssignDriverId] = useState("");
 
+  const canMutate = user?.role === "super_admin" || user?.role === "hub_manager";
+
   const load = async () => {
     const [v, d] = await Promise.all([http.get("/vehicles"), http.get("/drivers")]);
-    setVehicles(v.data); setDrivers(d.data);
+    let filteredVehicles = v.data;
+    let filteredDrivers = d.data;
+
+    if (user?.role === "hub_manager" && user.reference_id) {
+       const hmRes = await http.get("/hub-managers");
+       const manager = hmRes.data.find(m => m.id === user.reference_id);
+       if (manager) {
+         filteredDrivers = d.data.filter(dr => dr.hub_manager_id === manager.id);
+         const driverIds = filteredDrivers.map(dr => dr.id);
+         filteredVehicles = v.data.filter(veh => driverIds.includes(veh.assigned_driver_id) || !veh.assigned_driver_id);
+       }
+    } else if (user?.role === "shipper" && user.reference_id) {
+       filteredVehicles = v.data.filter(veh => veh.assigned_driver_id === user.reference_id);
+       filteredDrivers = d.data.filter(dr => dr.id === user.reference_id);
+    }
+
+    setVehicles(filteredVehicles); 
+    setDrivers(filteredDrivers);
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [user]);
 
   const [assignErr, setAssignErr] = useState("");
 
-  const create = async () => { await http.post("/vehicles", form); setOpen(false); load(); };
-  const remove = async (id) => { if (!window.confirm("Delete this vehicle?")) return; await http.delete(`/vehicles/${id}`); load(); };
+  const create = async () => { if (!canMutate) return; await http.post("/vehicles", form); setOpen(false); load(); };
+  const remove = async (id) => { 
+    if (!canMutate) return;
+    if (!window.confirm("Delete this vehicle?")) return; 
+    await http.delete(`/vehicles/${id}`); load(); 
+  };
   const assign = async () => {
+    if (!canMutate) return;
     try {
       setAssignErr("");
       await http.post(`/vehicles/${assignOpen.id}/assign`, { driver_id: assignDriverId });
@@ -29,7 +55,7 @@ export default function Vehicles() {
       setAssignErr(e.response?.data?.detail || "Error assigning driver");
     }
   };
-  const unassign = async (v) => { await http.post(`/vehicles/${v.id}/unassign`); load(); };
+  const unassign = async (v) => { if (!canMutate) return; await http.post(`/vehicles/${v.id}/unassign`); load(); };
 
   const dById = Object.fromEntries(drivers.map(d => [d.id, d]));
 
@@ -41,16 +67,15 @@ export default function Vehicles() {
 
   return (
     <div>
-      <div className="page-title"><span className="accent"></span>Fleet</div>
-      <div className="page-subtitle">FR-06 · FR-07 · FR-08 — Each driver owns exactly one fleet vehicle (one-to-one)</div>
+      <div className="page-title"><span className="accent"></span>{user?.role === "shipper" ? "My Vehicle" : "Fleet Management"}</div>
 
       <div className="toolbar">
-        <button className="btn primary" data-testid="add-vehicle-btn" onClick={() => { setForm({ plate: "", type: "van", fuel_type: "ev", capacity_kg: 500 }); setOpen(true); }}>+ Add Vehicle</button>
+        {canMutate && <button className="btn primary" data-testid="add-vehicle-btn" onClick={() => { setForm({ plate: "", type: "van", fuel_type: "ev", capacity_kg: 500 }); setOpen(true); }}>+ Add Vehicle</button>}
       </div>
 
       <div className="card" style={{ padding: 0 }}>
         <table className="tbl" data-testid="vehicles-table">
-          <thead><tr><th>Plate</th><th>Type</th><th>Fuel</th><th>Capacity</th><th>Assigned Driver</th><th></th></tr></thead>
+          <thead><tr><th>Plate</th><th>Type</th><th>Fuel</th><th>Capacity</th><th>Assigned Driver</th>{canMutate && <th></th>}</tr></thead>
           <tbody>
             {vehicles.map(v => {
               const drv = v.assigned_driver_id ? dById[v.assigned_driver_id] : null;
@@ -72,16 +97,18 @@ export default function Vehicles() {
                       </div>
                     ) : <span className="muted">Unassigned</span>}
                   </td>
-                  <td style={{ textAlign: "right" }}>
-                    {!v.assigned_driver_id
-                      ? <button className="btn sm" onClick={() => { setAssignOpen(v); setAssignDriverId(""); }} data-testid={`assign-vehicle-${v.id}`}>Assign</button>
-                      : <button className="btn sm ghost" onClick={() => unassign(v)} data-testid={`unassign-vehicle-${v.id}`}>Unassign</button>}
-                    <button className="btn sm ghost" style={{ color: "#b91c1c" }} onClick={() => remove(v.id)} data-testid={`del-vehicle-${v.id}`}>Delete</button>
-                  </td>
+                  {canMutate && (
+                    <td style={{ textAlign: "right" }}>
+                      {!v.assigned_driver_id
+                        ? <button className="btn sm" onClick={() => { setAssignOpen(v); setAssignDriverId(""); }} data-testid={`assign-vehicle-${v.id}`}>Assign</button>
+                        : <button className="btn sm ghost" onClick={() => unassign(v)} data-testid={`unassign-vehicle-${v.id}`}>Unassign</button>}
+                      <button className="btn sm ghost" style={{ color: "#b91c1c" }} onClick={() => remove(v.id)} data-testid={`del-vehicle-${v.id}`}>Delete</button>
+                    </td>
+                  )}
                 </tr>
               );
             })}
-            {vehicles.length === 0 && <tr><td colSpan={6} style={{ padding: 24, textAlign: "center", color: "#64748b" }}>No vehicles.</td></tr>}
+            {vehicles.length === 0 && <tr><td colSpan={canMutate ? 6 : 5} style={{ padding: 24, textAlign: "center", color: "#64748b" }}>{user?.role === "shipper" ? "No vehicle assigned yet." : "No vehicles."}</td></tr>}
           </tbody>
         </table>
       </div>

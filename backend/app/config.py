@@ -29,6 +29,12 @@ class Settings:
     osrm_base_url: str = field(
         default_factory=lambda: os.environ.get("OSRM_BASE_URL", "https://router.project-osrm.org")
     )
+    jwt_secret: str = field(
+        default_factory=lambda: os.environ.get("JWT_SECRET", "lioncity-super-secret-key-for-dev")
+    )
+    access_token_expire_minutes: int = field(
+        default_factory=lambda: int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
+    )
 
 
 settings = Settings()

@@ -4,8 +4,10 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { ShieldCheck, Lock, Mail, User, ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { ShieldCheck, Lock, Mail, User, ArrowLeft, Eye, EyeOff, AlertCircle } from "lucide-react";
 import ParticleNetwork from "@/components/ParticleNetwork";
+import { useAuth } from "@/context/AuthContext";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 // Import assets
 import authBackground from "@/assets/auth/background.jpg";
@@ -14,18 +16,27 @@ import logoText from "@/assets/logos/logo_text.png";
 
 export default function Auth() {
   const navigate = useNavigate();
+  const { login } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [view, setView] = useState("login"); // "login" or "reset"
   const [showPassword, setShowPassword] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     setIsLoading(true);
-    setTimeout(() => {
-      localStorage.setItem("lc_authenticated", "true");
-      setIsLoading(false);
+    setError(null);
+    try {
+      await login(email, password);
       navigate("/");
-    }, 1000);
+    } catch (err) {
+      console.error(err);
+      setError(err.response?.data?.detail || "Authentication failed. Please check your credentials.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleReset = (e) => {
@@ -86,6 +97,14 @@ export default function Auth() {
               
               <form onSubmit={handleLogin} className="flex-1 flex flex-col justify-between">
                 <CardContent className="space-y-5 px-10">
+                  {error && (
+                    <Alert variant="destructive" className="bg-red-500/20 border-red-500/50 text-white">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertDescription className="text-xs font-bold uppercase tracking-wider ml-2">
+                        {error}
+                      </AlertDescription>
+                    </Alert>
+                  )}
                   <div className="space-y-3">
                     <Label htmlFor="email" className="text-white text-[11px] font-black uppercase tracking-[0.15em] ml-1">
                       EMAIL
@@ -96,6 +115,8 @@ export default function Auth() {
                         id="email" 
                         type="email" 
                         placeholder="Enter your email" 
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
                         className="h-14 pl-12 bg-black/20 border-white/10 focus:border-[#0d7c78]/50 focus:bg-black/40 focus:ring-0 text-white placeholder:text-white/20 rounded-2xl transition-all text-base font-medium" 
                         required 
                       />
@@ -121,6 +142,8 @@ export default function Auth() {
                         id="password" 
                         type={showPassword ? "text" : "password"} 
                         placeholder="••••••••"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
                         className="h-14 pl-12 pr-12 bg-black/20 border-white/10 focus:border-[#0d7c78]/50 focus:bg-black/40 focus:ring-0 text-white rounded-2xl transition-all text-base placeholder:text-white/30 font-medium" 
                         required 
                       />

@@ -5,6 +5,26 @@ export const API = `${BACKEND_URL}/api`;
 
 export const http = axios.create({ baseURL: API, timeout: 20000 });
 
+http.interceptors.request.use((config) => {
+  const token = localStorage.getItem("lc_token");
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+http.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem("lc_token");
+      localStorage.removeItem("lc_user");
+      // Optionally redirect to login, but better handled in AuthContext/App
+    }
+    return Promise.reject(error);
+  }
+);
+
 export const fmtDist = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`);
 export const fmtDur = (s) => {
   const m = Math.round(s / 60);

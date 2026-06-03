@@ -153,7 +153,6 @@ export default function Orders() {
   return (
     <div>
       <div className="page-title"><span className="accent"></span>Orders & Dispatching</div>
-      <div className="page-subtitle">FR-12 · FR-13 · FR-14 · FR-15 · FR-16 — Warehouse entry, clustering, assignment & status</div>
 
       <div className="tabs">
         <div className={`tab ${tab==='inbound'?'active':''}`} data-testid="tab-inbound" onClick={()=>setTab('inbound')}>Inbound Warehouse</div>
