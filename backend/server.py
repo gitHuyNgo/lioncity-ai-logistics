@@ -11,8 +11,9 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
+import uvicorn
 
-from app import logging as _logging  # noqa: F401 — initialise root logger
+from app import logging as _logging
 from app.config import settings
 from app.database import close_db
 from app.routers import api_router
@@ -45,3 +46,6 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+if __name__ == "__main__":
+    uvicorn.run("server:app", host="0.0.0.0", port=8001, reload=True)
