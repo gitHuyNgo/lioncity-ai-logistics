@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation, useNavigate } from "react-router-dom";
 import {
-  LayoutDashboard, Users, Truck, Map, Package, Route as RouteIcon, UserCircle2, RefreshCw, RadioTower, Warehouse,
+  LayoutDashboard, Users, Truck, Map, Package, Route as RouteIcon, UserCircle2, RefreshCw, RadioTower, Warehouse, LogOut
 } from "lucide-react";
 import { http } from "./lib/api";
 import Overview from "./pages/Overview";
@@ -13,6 +13,7 @@ import Orders from "./pages/Orders";
 import Routing from "./pages/Routing";
 import Shipper from "./pages/Shipper";
 import Hubs from "./pages/Hubs";
+import Auth from "./pages/Auth";
 import "./App.css";
 
 const NAV = [
@@ -67,8 +68,14 @@ function TopBar() {
   const [role, setRole] = useState(() => localStorage.getItem("lc_role") || "admin");
   const [seeding, setSeeding] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
 
   useEffect(() => { localStorage.setItem("lc_role", role); }, [role]);
+
+  const handleLogout = () => {
+    localStorage.removeItem("lc_authenticated");
+    navigate("/auth");
+  };
 
   const reseed = async () => {
     if (!window.confirm("⚠️  This will WIPE all your data (hubs, drivers, vehicles, zones, orders) and replace it with the demo dataset. Continue?")) return;
@@ -110,9 +117,20 @@ function TopBar() {
         <button className="btn" onClick={reseed} disabled={seeding} data-testid="reseed-btn" title="Wipe DB and load demo data">
           <RefreshCw size={14} /> {seeding ? "Seeding…" : "Reset to demo"}
         </button>
+        <button className="btn ghost" onClick={handleLogout} title="Sign Out">
+          <LogOut size={16} />
+        </button>
       </div>
     </header>
   );
+}
+
+function ProtectedRoute({ children }) {
+  const isAuthenticated = localStorage.getItem("lc_authenticated") === "true";
+  if (!isAuthenticated) {
+    return <Navigate to="/auth" replace />;
+  }
+  return children;
 }
 
 function Shell() {
@@ -178,7 +196,14 @@ function Shell() {
 export default function App() {
   return (
     <BrowserRouter>
-      <Shell />
+      <Routes>
+        <Route path="/auth" element={<Auth />} />
+        <Route path="*" element={
+          <ProtectedRoute>
+            <Shell />
+          </ProtectedRoute>
+        } />
+      </Routes>
     </BrowserRouter>
   );
 }
