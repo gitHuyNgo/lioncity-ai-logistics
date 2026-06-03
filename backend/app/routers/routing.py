@@ -177,3 +177,101 @@ async def simulate_step(driver_id: str, body: SimulateStepIn) -> dict:
     )
     progress_pct = round(100 * index / max(1, len(geometry) - 1), 1)
     return {"location": new_location, "progress_pct": progress_pct}
+
+
+@router.post("/routing/start")
+async def start_delivery(body: RoutePlanIn) -> dict:
+    """Officially start delivery: status → delivering for driver and orders."""
+    route = await find_one("routes", {"driver_id": body.driver_id})
+    if not route:
+        raise HTTPException(status_code=400, detail="No route planned for this driver")
+
+    # 1. Update Driver status, initial location AND reset route index
+    geometry = route["geometry"]
+    start_loc = {"lat": geometry[0][0], "lng": geometry[0][1], "updated_at": now_iso()}
+    
+    await db.drivers.update_one(
+        {"id": body.driver_id},
+        {"$set": {
+            "status": "delivering", 
+            "location": start_loc,
+            "last_route_index": 0 # Reset to start of route
+        }}
+    )
+
+    # 2. Update all orders in the route to 'delivering'
+    await db.orders.update_many(
+        {"id": {"$in": route["ordered_order_ids"]}},
+        {"$set": {"status": "delivering"}}
+    )
+
+    return {"ok": True, "message": "Delivery started", "order_count": len(route["ordered_order_ids"])}
+
+
+@router.post("/routing/simulate-step-all")
+async def simulate_step_all(body: SimulateStepIn) -> dict:
+    """Advance all 'delivering' drivers forward along their routes using persisted index."""
+    drivers = await find_list("drivers", {"status": "delivering"})
+    results = []
+    
+    for driver in drivers:
+        driver_id = driver["id"]
+        route = await find_one("routes", {"driver_id": driver_id})
+        if not route:
+            continue
+            
+        geometry = route["geometry"]
+        # Use the stored index, or find the closest if it's missing (legacy/manual start)
+        index = driver.get("last_route_index")
+        
+        if index is None:
+            current = driver.get("location")
+            if not current:
+                index = 0
+            else:
+                index = min(
+                    range(len(geometry)),
+                    key=lambda i: haversine(
+                        (current["lat"], current["lng"]),
+                        (geometry[i][0], geometry[i][1]),
+                    ),
+                )
+        
+        # Move forward from the CURRENT index
+        start_index = index
+        travelled = 0.0
+        while index < len(geometry) - 1 and travelled < body.step_m:
+            d = haversine(
+                (geometry[index][0], geometry[index][1]),
+                (geometry[index + 1][0], geometry[index + 1][1]),
+            )
+            travelled += d
+            index += 1
+            
+        new_location = {
+            "lat": geometry[index][0],
+            "lng": geometry[index][1],
+            "updated_at": now_iso(),
+        }
+        
+        if index >= len(geometry) - 1:
+            # Reached end: cleanup
+            await db.orders.update_many(
+                {"driver_id": driver_id, "status": "delivering"},
+                {"$set": {"status": "delivered"}}
+            )
+            await db.drivers.update_one(
+                {"id": driver_id},
+                {"$set": {"status": "available", "location": new_location, "last_route_index": None}},
+            )
+            await db.routes.delete_one({"driver_id": driver_id})
+            results.append({"driver_id": driver_id, "reached": True})
+        else:
+            # Still moving: Update location AND persist the new index
+            await db.drivers.update_one(
+                {"id": driver_id},
+                {"$set": {"location": new_location, "last_route_index": index}},
+            )
+            results.append({"driver_id": driver_id, "reached": False})
+            
+    return {"ok": True, "count": len(results), "details": results}

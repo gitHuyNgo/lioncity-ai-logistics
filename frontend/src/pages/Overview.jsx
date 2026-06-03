@@ -1,11 +1,13 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { http, fmtDate } from "../lib/api";
 import MapView from "../components/MapView";
 import { Badge } from "../components/UI";
 import { useAuth } from "../context/AuthContext";
+import { useTracking } from "../context/TrackingContext";
 
 export default function Overview() {
   const { user } = useAuth();
+  const { isTracking, trackedDriverId, trackingData, isSimulating, toggleSimulation } = useTracking();
   const [stats, setStats] = useState(null);
   const [orders, setOrders] = useState([]);
   const [drivers, setDrivers] = useState([]);
@@ -14,9 +16,8 @@ export default function Overview() {
   const [incidents, setIncidents] = useState([]);
   const [linkedEntity, setLinkedEntity] = useState(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
-      // Use Promise.allSettled to handle potential 403 errors gracefully
       const [sRes, oRes, dRes, zRes, hRes] = await Promise.allSettled([
         http.get("/stats"), http.get("/orders"), http.get("/drivers"), http.get("/zones"), http.get("/hubs"),
       ]);
@@ -38,37 +39,28 @@ export default function Overview() {
           const manager = hm.data.find(m => m.id === user.reference_id);
           if (manager) {
             setLinkedEntity(manager);
-            
-            // Managers see ALL hubs and ALL zones for context
             filteredHubs = h.data;
             filteredZones = z.data;
-
-            // But only see THEIR drivers and orders
             const hasLinks = d.data.some(dr => dr.hub_manager_id === manager.id);
             if (hasLinks) {
               filteredDrivers = d.data.filter(dr => dr.hub_manager_id === manager.id);
               const driverIds = filteredDrivers.map(dr => dr.id);
               filteredOrders = o.data.filter(ord => driverIds.includes(ord.assigned_driver_id) || ord.hub_id === manager.hub_id);
             } else if (manager.hub_id) {
-              // Fallback: if no direct driver links, filter orders by hub_id
               filteredOrders = o.data.filter(ord => ord.hub_id === manager.hub_id);
-              // Drivers are harder to filter without direct links, so we show all or those in linked zones
-              // For now, if no explicit hub_manager_id links exist in the data, we might show all drivers
-              // to avoid a broken UI, but ideally we'd link them in the DB.
             }
           }
         } catch (err) { console.error("Error fetching linked manager", err); }
       }
  else if (user?.role === "shipper" && user.reference_id) {
         try {
-          const dRec = filteredDrivers.find(dr => dr.id === user.reference_id);
+          const dRec = d.data.find(dr => dr.id === user.reference_id);
           if (dRec) {
             setLinkedEntity(dRec);
             filteredDrivers = [dRec];
-            filteredOrders = filteredOrders.filter(ord => ord.assigned_driver_id === dRec.id);
+            filteredOrders = o.data.filter(ord => ord.assigned_driver_id === dRec.id);
             if (dRec.zone_id) {
-              filteredZones = filteredZones.filter(zone => zone.id === dRec.zone_id);
-              // Re-fetch full driver list to find colleagues if initial fetch was filtered (unlikely given allSettled)
+              filteredZones = z.data.filter(zone => zone.id === dRec.zone_id);
               const colleagues = (d.data || []).filter(dr => dr.zone_id === dRec.zone_id && dr.id !== dRec.id);
               filteredDrivers = [...filteredDrivers, ...colleagues];
             }
@@ -86,9 +78,23 @@ export default function Overview() {
     }
     
     try { const inc = await http.get("/lta/incidents"); setIncidents(inc.data); } catch { setIncidents([]); }
-  };
+  }, [user]);
 
-  useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t); }, [user]);
+  useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t); }, [load]);
+
+  // Merge global tracking data for map display
+  const mapDrivers = isTracking && trackingData.driver 
+    ? [...drivers.filter(d => d.id !== trackedDriverId), trackingData.driver]
+    : drivers;
+  
+  const mapRoutes = isTracking && trackingData.route
+    ? [{ ...trackingData.route, color: "#0d7c78" }]
+    : [];
+
+  const stepSim = async () => {
+    await http.post("/routing/simulate-step-all", { step_m: 500 });
+    load();
+  };
 
   const stat = (label, value, tone) => (
     <div className={`stat ${tone || ""}`} data-testid={`stat-${label.toLowerCase().replace(/\s+/g, '-')}`}>
@@ -103,16 +109,20 @@ export default function Overview() {
     return `Welcome, ${firstName}`;
   };
 
-  const getSubTitle = () => {
-    if (user?.role === "super_admin") return "Singapore-wide logistics control.";
-    if (user?.role === "hub_manager") return `Managing ${linkedEntity?.hub_name || "Assigned Hub"}.`;
-    if (user?.role === "shipper") return `Shipper Cockpit Overview · Route Status.`;
-    return "";
-  };
-
   return (
     <div>
-      <div className="page-title"><span className="accent"></span>{getGreeting()}</div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div className="page-title" style={{ margin: 0 }}><span className="accent"></span>{getGreeting()}</div>
+        <div className="card" style={{ padding: "8px 16px", display: "flex", alignItems: "center", gap: 12, margin: 0, border: "1px solid var(--teal-ink)22" }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: "var(--teal-ink)" }}>GLOBAL SIMULATION</span>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className={`btn sm ${isSimulating ? 'danger' : 'primary'}`} onClick={toggleSimulation}>
+              {isSimulating ? "Stop All" : "Auto Play"}
+            </button>
+            <button className="btn sm ghost" onClick={stepSim} disabled={isSimulating}>Step All +500m</button>
+          </div>
+        </div>
+      </div>
 
       <div className="stat-grid" style={{ marginBottom: 18 }}>
         {user?.role !== "shipper" && stat("Pending Orders", stats?.orders_pending, "red")}
@@ -130,12 +140,26 @@ export default function Overview() {
           <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span className="card-title">Live Operations Map</span>
             <div style={{ display: "flex", gap: 12 }}>
-              <Badge tone="teal">{drivers.length} Drivers</Badge>
+              <Badge tone="teal">{mapDrivers.length} Drivers</Badge>
               <Badge tone="amber">{orders.length} Active Orders</Badge>
             </div>
           </div>
           <div style={{ padding: 12 }}>
-            <MapView height={560} orders={orders} drivers={drivers} hubs={hubs} zones={zones} />
+            <MapView 
+              height={560} 
+              orders={orders} 
+              drivers={mapDrivers} 
+              hubs={hubs} 
+              zones={zones} 
+              routes={mapRoutes}
+              tracking={isTracking ? { driver_id: trackedDriverId, location: trackingData.driver?.location } : null}
+              highlight={{ 
+                hubId: user?.role === "hub_manager" ? linkedEntity?.hub_id : null,
+                zoneIds: user?.role === "hub_manager" 
+                  ? [...new Set(drivers.map(dr => dr.zone_id).filter(Boolean))]
+                  : (user?.role === "shipper" ? [linkedEntity?.zone_id] : [])
+              }}
+            />
           </div>
         </div>
 

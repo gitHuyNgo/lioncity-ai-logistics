@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { http } from "../lib/api";
 import { Modal, Badge } from "../components/UI";
 import { useAuth } from "../context/AuthContext";
@@ -15,7 +15,7 @@ export default function Drivers() {
 
   const canMutate = user?.role === "super_admin" || user?.role === "hub_manager";
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const [d, v, z] = await Promise.all([http.get("/drivers"), http.get("/vehicles"), http.get("/zones")]);
     let filteredDrivers = d.data;
 
@@ -37,8 +37,9 @@ export default function Drivers() {
     setDrivers(filteredDrivers); 
     setVehicles(v.data); 
     setZones(z.data);
-  };
-  useEffect(() => { load(); }, [user]);
+  }, [user]);
+
+  useEffect(() => { load(); }, [load]);
 
   const openNew = () => { if (!canMutate) return; setEditing(null); setForm({ name: "", phone: "", license_type: "B", zone_id: "" }); setOpen(true); setErr(""); };
   const openEdit = (d) => { if (!canMutate) return; setEditing(d); setForm({ name: d.name, phone: d.phone, license_type: d.license_type, zone_id: d.zone_id || "" }); setOpen(true); setErr(""); };

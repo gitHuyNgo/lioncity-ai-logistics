@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { http } from "../lib/api";
 import { Modal, Badge } from "../components/UI";
 import { useAuth } from "../context/AuthContext";
@@ -14,7 +14,7 @@ export default function Vehicles() {
 
   const canMutate = user?.role === "super_admin" || user?.role === "hub_manager";
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const [v, d] = await Promise.all([http.get("/vehicles"), http.get("/drivers")]);
     let filteredVehicles = v.data;
     let filteredDrivers = d.data;
@@ -34,8 +34,9 @@ export default function Vehicles() {
 
     setVehicles(filteredVehicles); 
     setDrivers(filteredDrivers);
-  };
-  useEffect(() => { load(); }, [user]);
+  }, [user]);
+
+  useEffect(() => { load(); }, [load]);
 
   const [assignErr, setAssignErr] = useState("");
 

@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"}],"uuid":"d145b937d9b14e67a32abe4b422c0fea","collectionName":"hub_managers","type":"collection"}

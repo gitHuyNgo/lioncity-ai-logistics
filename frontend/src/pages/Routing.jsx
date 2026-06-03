@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { http, fmtDist, fmtDur } from "../lib/api";
 import MapView from "../components/MapView";
 import { Badge } from "../components/UI";
+import { useTracking } from "../context/TrackingContext";
 
 const MODES = [
   { id: "time", label: "Time Priority", desc: "Fastest route" },
@@ -17,23 +18,42 @@ export default function Routing() {
   const [mode, setMode] = useState("time");
   const [route, setRoute] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [speedBands, setSpeedBands] = useState([]);
   const [showTraffic, setShowTraffic] = useState(false);
   const [err, setErr] = useState("");
+  
+  const { isTracking, trackedDriverId, trackingData, startTracking, stopTracking } = useTracking();
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const [d, o, h] = await Promise.all([http.get("/drivers"), http.get("/orders"), http.get("/hubs")]);
     setDrivers(d.data); setOrders(o.data); setHubs(h.data);
-  };
-  useEffect(() => { load(); }, []);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Sync with global tracking data
+  const currentDriver = useMemo(() => {
+    if (isTracking && trackedDriverId === driverId && trackingData.driver) {
+      return trackingData.driver;
+    }
+    return drivers.find(d => d.id === driverId);
+  }, [isTracking, trackedDriverId, driverId, trackingData.driver, drivers]);
+
+  const currentRoute = useMemo(() => {
+    if (isTracking && trackedDriverId === driverId && trackingData.route) {
+      return trackingData.route;
+    }
+    return route;
+  }, [isTracking, trackedDriverId, driverId, trackingData.route, route]);
 
   useEffect(() => {
     (async () => {
-      if (driverId) {
+      if (driverId && (!isTracking || trackedDriverId !== driverId)) {
         try { const r = await http.get(`/routing/${driverId}`); setRoute(r.data); } catch { setRoute(null); }
       }
     })();
-  }, [driverId]);
+  }, [driverId, isTracking, trackedDriverId]);
 
   const plan = async () => {
     setBusy(true); setErr(""); setRoute(null);
@@ -44,9 +64,19 @@ export default function Routing() {
     setBusy(false);
   };
 
+  const startDelivery = async () => {
+    setStarting(true); setErr("");
+    try {
+      await http.post("/routing/start", { driver_id: driverId });
+      await load();
+      startTracking(driverId);
+    } catch (e) { setErr(e.response?.data?.detail || "Error starting delivery"); }
+    setStarting(false);
+  };
+
   const simulate = async () => {
-    await http.post(`/drivers/${driverId}/simulate-step`, { step_m: 400 });
-    load();
+    await http.post(`/drivers/${driverId}/simulate-step`, { step_m: 500 });
+    if (!isTracking) load();
   };
 
   const toggleTraffic = async () => {
@@ -60,7 +90,7 @@ export default function Routing() {
   const driverOrders = orders.filter(o => o.driver_id === driverId && ["assigned", "delivering"].includes(o.status));
   const ordersById = Object.fromEntries(orders.map(o => [o.id, o]));
   const driversWithOrders = drivers.filter(d => orders.some(o => o.driver_id === d.id && ["assigned","delivering"].includes(o.status)));
-  const selectedDriver = drivers.find(d => d.id === driverId);
+  const isDelivering = currentDriver?.status === "delivering";
 
   return (
     <div>
@@ -72,28 +102,57 @@ export default function Routing() {
           <option value="">— choose driver with orders —</option>
           {driversWithOrders.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
         </select>
-        <select className="select" style={{ width: 180 }} data-testid="routing-mode" value={mode} onChange={e => setMode(e.target.value)}>
+        <select className="select" style={{ width: 180 }} data-testid="routing-mode" value={mode} onChange={e => setMode(e.target.value)} disabled={isDelivering}>
           {MODES.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
         </select>
-        <button className="btn primary" disabled={!driverId || busy || driverOrders.length === 0} onClick={plan} data-testid="plan-route-btn">
-          {busy ? "Planning…" : "Plan Route"}
-        </button>
-        {route && <button className="btn" onClick={simulate} data-testid="simulate-step-btn">▶ Advance Driver 400 m</button>}
+
+        {!isDelivering ? (
+          <button className="btn primary" disabled={!driverId || busy || driverOrders.length === 0} onClick={plan} data-testid="plan-route-btn">
+            {busy ? "Planning…" : "Plan Route"}
+          </button>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Badge tone="delivering" style={{ height: 34, padding: "0 16px" }}>In Delivery</Badge>
+            <button className={`btn sm ${isTracking && trackedDriverId === driverId ? 'danger' : 'primary'}`} 
+              onClick={() => (isTracking && trackedDriverId === driverId) ? stopTracking() : startTracking(driverId)}>
+              {isTracking && trackedDriverId === driverId ? "Stop Tracking" : "Live Track"}
+            </button>
+          </div>
+        )}
+
+        {currentRoute && !isDelivering && (
+          <button className="btn primary" style={{ background: "var(--emerald)", borderColor: "var(--emerald)" }} 
+            onClick={startDelivery} disabled={starting} data-testid="start-delivery-btn">
+            {starting ? "Starting..." : "✓ Start Delivery"}
+          </button>
+        )}
+
+        {isDelivering && <button className="btn" onClick={simulate} data-testid="simulate-step-btn">▶ Advance Driver 500 m</button>}
+        
         <div style={{ flex: 1 }}></div>
         <button className="btn" onClick={toggleTraffic} data-testid="toggle-traffic-btn">{showTraffic ? "Hide" : "Show"} Live Traffic</button>
       </div>
 
       {err && <div className="card" style={{ marginBottom: 12, borderColor: "#fecaca", background: "#fef2f2", color: "#991b1b", fontSize: 13 }}>{err}</div>}
 
+      {isTracking && trackedDriverId === driverId && (
+        <div className="tracking-active-bar">
+          <span className="tracking-dot"></span>
+          LIVE TRACKING ACTIVE — Auto-updating every 2s
+          {trackingData.lastUpdated > 0 && <span style={{ marginLeft: 'auto', fontWeight: 400, opacity: 0.7 }}>Synced: {new Date(trackingData.lastUpdated).toLocaleTimeString()}</span>}
+        </div>
+      )}
+
       <div className="section">
         <div className="card" style={{ padding: 0, overflow: "hidden" }}>
           <MapView
             height={560}
             orders={driverOrders.length ? driverOrders : orders}
-            drivers={selectedDriver && selectedDriver.location ? [selectedDriver] : []}
+            drivers={currentDriver && currentDriver.location ? [currentDriver] : []}
             hubs={hubs}
-            routes={route ? [{ geometry: route.geometry, color: mode === "eco" ? "#059669" : mode === "avoid_erp" ? "#d97706" : "#0d7c78" }] : []}
+            routes={currentRoute ? [{ ...currentRoute, color: mode === "eco" ? "#059669" : mode === "avoid_erp" ? "#d97706" : "#0d7c78" }] : []}
             speedBands={showTraffic ? speedBands : []}
+            tracking={isTracking && trackedDriverId === driverId ? { driver_id: driverId, location: currentDriver?.location } : null}
           />
           {showTraffic && (
             <div className="legend" style={{ padding: "8px 12px" }}>
@@ -111,13 +170,13 @@ export default function Routing() {
               <div className="card-title">Delivery Sequence</div>
               <div className="card-subtitle">{MODES.find(m => m.id === mode)?.desc}</div>
             </div>
-            {route && <Badge tone="assigned">{fmtDist(route.distance_m)} · {fmtDur(route.duration_s)}</Badge>}
+            {currentRoute && <Badge tone={isDelivering ? "delivering" : "assigned"}>{fmtDist(currentRoute.distance_m)} · {fmtDur(currentRoute.duration_s)}</Badge>}
           </div>
 
-          {!route && <div className="empty">Select a driver with assigned orders and plan a route.</div>}
-          {route && (
+          {!currentRoute && <div className="empty">Select a driver with assigned orders and plan a route.</div>}
+          {currentRoute && (
             <ol style={{ padding: 0, margin: 0, listStyle: "none" }}>
-              {route.ordered_order_ids.map((oid, i) => {
+              {currentRoute.ordered_order_ids.map((oid, i) => {
                 const o = ordersById[oid];
                 if (!o) return null;
                 return (

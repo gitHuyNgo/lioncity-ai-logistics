@@ -19,6 +19,7 @@ class Driver(MongoModel):
     vehicle_id: Optional[str] = None
     zone_id: Optional[str] = None
     location: Optional[Dict[str, Any]] = None
+    last_route_index: Optional[int] = None
     hub_manager_id: Optional[str] = None
 
 

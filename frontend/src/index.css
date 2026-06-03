@@ -339,3 +339,66 @@ a[href*="emergent-badge"] {
   background: var(--slate-50); color: var(--ink); border: 1px solid var(--border);
   margin-right: 4px;
 }
+
+/* Map Animations */
+@keyframes marker-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(13, 124, 120, 0.4); }
+  70% { box-shadow: 0 0 0 12px rgba(13, 124, 120, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(13, 124, 120, 0); }
+}
+
+@keyframes marker-float {
+  0%, 100% { transform: translateY(0) rotate(45deg); }
+  50% { transform: translateY(-4px) rotate(45deg); }
+}
+
+.highlight-hub {
+  animation: marker-pulse 2s infinite, marker-float 3s ease-in-out infinite;
+  z-index: 1000 !important;
+}
+
+.highlight-zone {
+  stroke-dasharray: 20, 10, 5, 10;
+  animation: dash-move 15s linear infinite, zone-pulse 3s ease-in-out infinite;
+}
+
+@keyframes zone-pulse {
+  0% { fill-opacity: 0.15; }
+  50% { fill-opacity: 0.35; }
+  100% { fill-opacity: 0.15; }
+}
+
+/* Tracking UI */
+@keyframes pulse-tracking {
+  0% { opacity: 1; }
+  50% { opacity: 0.4; }
+  100% { opacity: 1; }
+}
+
+.tracking-dot {
+  width: 8px;
+  height: 8px;
+  background: #ef4444;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 6px;
+  animation: pulse-tracking 1s ease-in-out infinite;
+}
+
+.tracking-active-bar {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+@keyframes dash-move {
+  from { stroke-dashoffset: 1000; }
+  to { stroke-dashoffset: 0; }
+}
