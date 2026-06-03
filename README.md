@@ -1,15 +1,11 @@
 # Follow the instructions below
 
-
-```bash
-docker run -d -p 27017:27017 --name lioncity-mongo mongo:7
-```
-
 ### Backend
-```python
+```bash
+docker compose up -d
 cd backend
-python3 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+python -m venv .venv
+source .venv/Scripts/activate
 pip install -r requirements.txt
 ```
 
@@ -21,10 +17,10 @@ CORS_ORIGINS=http://localhost:3000
 LTA_ACCOUNT_KEY=your_api_key
 OSRM_BASE_URL=https://router.project-osrm.org
 ```
-
 ```python
-uvicorn server:app --host 0.0.0.0 --port 8001 --reload
+python server.py
 ```
+
 
 ### Frontend
 ```python
@@ -36,6 +32,7 @@ Create `frontend/.env`
 ```bash
 REACT_APP_BACKEND_URL=http://localhost:8001
 WDS_SOCKET_PORT=3000
+ENABLE_HEALTH_CHECK=false
 ```
 
 ```python
