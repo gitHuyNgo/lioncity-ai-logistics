@@ -2,31 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Design System tokens (single source of truth — :root + .dark) */
+@import './styles/tokens.css';
+
 /* Leaflet CSS */
 @import 'leaflet/dist/leaflet.css';
 
-:root {
-  --bg: #f4f7f9;
-  --panel: #ffffff;
-  --panel-2: #f8fafc;
-  --ink: #0b1e24;
-  --ink-muted: #5a6a73;
-  --border: #d9e2e8;
-  --teal: #0d7c78;
-  --teal-ink: #074e4b;
-  --teal-50: #e6f4f3;
-  --red: #d2233c;
-  --red-50: #fde7ea;
-  --amber: #c77900;
-  --emerald: #047857;
-  --emerald-50: #d1fae5;
-  --slate-50: #f1f5f9;
-}
-
 html, body, #root {
   height: 100%;
-  background: var(--bg);
-  color: var(--ink);
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
   font-family: 'Inter', 'IBM Plex Sans', system-ui, sans-serif;
   font-feature-settings: "cv11", "ss01";
 }
@@ -40,224 +25,26 @@ a[href*="emergent-badge"] {
 
 * { box-sizing: border-box; }
 
-.sg-title {
-  font-family: 'IBM Plex Serif', 'Source Serif Pro', Georgia, serif;
-  letter-spacing: -0.01em;
-}
-
-/* Compact, data-dense layout */
-.lc-shell {
-  display: grid;
-  grid-template-columns: 232px 1fr;
-  height: 100vh;
-}
-
-.lc-sidebar {
-  background: #0b1e24;
-  color: #cfe4e3;
-  padding: 18px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  border-right: 1px solid rgba(255,255,255,.06);
-  position: relative;
-  z-index: 40;
-}
-
-.lc-brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 4px 8px 14px 8px;
-  border-bottom: 1px solid rgba(255,255,255,.08);
-  margin-bottom: 10px;
-}
-.lc-brand .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--red); box-shadow: 0 0 0 3px rgba(210,35,60,.18); }
-.lc-brand .title { font-weight: 600; letter-spacing: .01em; font-size: 15px; color: #e7eef0; }
-.lc-brand .subtitle { font-size: 10.5px; color: #7e9a9b; letter-spacing: .12em; text-transform: uppercase; }
-
-.nav-group-label {
-  color: #6c8889;
-  font-size: 10.5px;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-  padding: 14px 8px 6px 8px;
-}
-
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  font-size: 13.5px;
-  color: #b8cecd;
-  cursor: pointer;
-  transition: background-color .15s ease, color .15s ease;
-  text-decoration: none;
-}
-.nav-item:hover { background: rgba(255,255,255,.04); color: #e8f1f0; }
-.nav-item.active {
-  background: linear-gradient(180deg, rgba(13,124,120,.35), rgba(13,124,120,.18));
-  color: #ffffff;
-  box-shadow: inset 2px 0 0 0 var(--teal);
-}
-.nav-item svg { width: 15px; height: 15px; }
-
-.lc-main { display: flex; flex-direction: column; min-width: 0; }
-
-.lc-topbar {
-  height: 56px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 22px;
-  gap: 16px;
-  position: relative;
-  z-index: 100;
-}
-
-.lc-role-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: var(--teal-50);
-  color: var(--teal-ink);
-  font-size: 12px;
-  font-weight: 600;
-  border: 1px solid rgba(13,124,120,.2);
-}
-
-.lc-content { flex: 1; overflow: auto; padding: 22px; }
-
-.page-title {
-  display: flex; align-items: baseline; gap: 10px;
-  font-size: 22px; font-weight: 600; letter-spacing: -.01em;
-  margin-bottom: 2px;
-}
-.page-title .accent {
-  height: 6px; width: 6px; background: var(--red); border-radius: 50%;
-}
-.page-subtitle { color: var(--ink-muted); font-size: 13px; margin-bottom: 18px; }
-
-.card {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 16px;
-  box-shadow: 0 1px 0 rgba(10, 30, 36, .02);
-}
-.card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-.card-title { font-weight: 600; font-size: 14px; letter-spacing: .01em; }
-.card-subtitle { color: var(--ink-muted); font-size: 12px; }
-
-.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
-.stat {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 14px 16px;
-}
-.stat .label { font-size: 11px; color: var(--ink-muted); text-transform: uppercase; letter-spacing: .1em; }
-.stat .value { font-size: 26px; font-weight: 600; margin-top: 4px; font-variant-numeric: tabular-nums; }
-.stat .delta { font-size: 11.5px; margin-top: 4px; color: var(--ink-muted); }
-.stat.red { border-top: 3px solid var(--red); }
-.stat.teal { border-top: 3px solid var(--teal); }
-.stat.amber { border-top: 3px solid var(--amber); }
-.stat.emerald { border-top: 3px solid var(--emerald); }
-
-/* Tables */
-.tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
-.tbl th {
-  text-align: left; font-weight: 600; font-size: 11px; letter-spacing: .1em;
-  text-transform: uppercase; color: var(--ink-muted);
-  padding: 10px 12px; background: var(--slate-50); border-bottom: 1px solid var(--border);
-  position: sticky; top: 0;
-}
-.tbl td {
-  padding: 10px 12px; border-bottom: 1px solid var(--border); color: var(--ink);
-  font-variant-numeric: tabular-nums;
-}
-.tbl tr:hover td { background: #fafcfc; }
-.tbl .muted { color: var(--ink-muted); }
-
-.badge {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: .02em;
-  border: 1px solid transparent;
-}
-.badge.available { background: var(--emerald-50); color: #065f46; border-color: #a7f3d0; }
-.badge.delivering { background: #fef3c7; color: #92400e; border-color: #fde68a; }
-.badge.off-duty, .badge.off_duty { background: #e5e7eb; color: #374151; border-color: #d1d5db; }
-.badge.pending { background: var(--slate-50); color: #1f2937; border-color: #cbd5e1; }
-.badge.assigned { background: #dbeafe; color: #1e40af; border-color: #bfdbfe; }
-.badge.delivered { background: var(--emerald-50); color: #065f46; border-color: #a7f3d0; }
-.badge.failed { background: var(--red-50); color: #9f1239; border-color: #fecdd3; }
-.badge.ev { background: var(--teal-50); color: var(--teal-ink); border-color: #b3d7d5; }
-.badge.diesel { background: #eef2f4; color: #334155; border-color: #cbd5e1; }
-
-/* Buttons */
-.btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  height: 34px; padding: 0 14px; border-radius: 8px; font-size: 13px; font-weight: 500;
-  cursor: pointer; transition: all .15s ease; border: 1px solid var(--border);
-  background: var(--panel); color: var(--ink);
-}
-.btn:hover { background: var(--panel-2); }
-.btn.primary { background: var(--teal); color: #fff; border-color: var(--teal); }
-.btn.primary:hover { background: var(--teal-ink); }
-.btn.danger { background: var(--red); color: #fff; border-color: var(--red); }
-.btn.danger:hover { background: #a81c30; }
-.btn.ghost { background: transparent; border-color: transparent; }
-.btn.ghost:hover { background: var(--slate-50); }
-.btn.sm { height: 28px; padding: 0 10px; font-size: 12px; }
-
 .input, .select, .textarea {
   width: 100%;
   height: 36px;
   padding: 0 10px;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: 8px;
   font-size: 13px;
-  background: #fff;
-  color: var(--ink);
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
   outline: none;
   transition: border-color .15s, box-shadow .15s;
 }
 .textarea { height: auto; padding: 8px 10px; min-height: 72px; }
-.input:focus, .select:focus, .textarea:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(13,124,120,.12); }
-.label { font-size: 12px; font-weight: 500; color: var(--ink-muted); display: block; margin-bottom: 4px; }
+.input:focus, .select:focus, .textarea:focus { border-color: hsl(var(--primary)); box-shadow: 0 0 0 3px hsl(var(--primary) / 0.12); }
+.label { font-size: 12px; font-weight: 500; color: hsl(var(--muted-foreground)); display: block; margin-bottom: 4px; }
 
 .field { margin-bottom: 10px; }
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 
-.map-wrap { height: 580px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
-.map-wrap.full { height: calc(100vh - 150px); }
-
-.legend {
-  display: flex; gap: 12px; font-size: 11.5px; color: var(--ink-muted);
-  padding: 10px 0 0 0; flex-wrap: wrap;
-}
-.legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
-
-/* Dialog */
-.modal-backdrop {
-  position: fixed; inset: 0; background: rgba(10,30,36,.45);
-  display: flex; align-items: center; justify-content: center; z-index: 1000;
-  padding: 20px;
-}
-.modal {
-  background: #fff; border-radius: 12px; width: 100%; max-width: 520px;
-  max-height: 90vh; overflow: auto; padding: 20px 22px;
-  border: 1px solid var(--border); box-shadow: 0 20px 50px rgba(10,30,36,.15);
-}
-.modal h3 { font-size: 16px; font-weight: 600; margin-bottom: 14px; }
-.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+.map-wrap { height: 580px; border-radius: 10px; overflow: hidden; border: 1px solid hsl(var(--border)); }
 
 /* Dialog overlays on map sections */
 .section { display: grid; grid-template-columns: 1fr 420px; gap: 16px; }
@@ -265,52 +52,200 @@ a[href*="emergent-badge"] {
 
 /* Scrollbars */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: #cfd9dd; border-radius: 6px; }
+::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 
 /* Leaflet tweaks */
-.leaflet-container { font-family: inherit; background: #e5eaee; }
-.hub-marker {
-  background: var(--red);
-  border: 3px solid #fff;
+.leaflet-container { font-family: inherit; background: hsl(var(--muted)); }
+
+/* ── Token-driven map markers (buildMarkerIcon) ─────────────────────────────
+   Shape + lucide icon distinguish each marker type, not color alone (Req 12.1).
+   Colors arrive as CSS custom properties (--mk-bg/--mk-fg) on the inner element
+   so markers re-theme with the .dark class. Hover / keyboard focus apply a
+   scale+elevation emphasis (Req 12.3); reduced-motion gating lands in 10.7. */
+.lc-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform var(--motion-fast, 150ms) ease, filter var(--motion-fast, 150ms) ease;
+  transform-origin: center bottom;
+}
+.lc-marker:hover,
+.lc-marker:focus-visible {
+  transform: scale(1.18);
+  filter: drop-shadow(var(--shadow-md));
+  outline: none;
+  z-index: 1000 !important;
+}
+
+/* shared inner shape (hub / driver / incident) */
+.lc-marker__shape {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--mk-bg);
+  color: var(--mk-fg);
+  border: 2px solid hsl(var(--card));
+  box-shadow: var(--shadow-md);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+.lc-marker__shape svg { display: block; }
+
+/* hub: rounded square */
+.lc-marker--hub .lc-marker__shape { border-radius: 6px; }
+.lc-marker--hub.lc-marker--default .lc-marker__shape {
+  border-radius: 7px;
+  box-shadow: 0 0 0 4px hsl(var(--ring) / 0.30), var(--shadow-md);
+}
+
+/* driver: circular avatar */
+.lc-marker--driver .lc-marker__shape { border-radius: 50%; }
+
+/* incident: diamond (rotate the shape, counter-rotate the icon) */
+.lc-marker--incident .lc-marker__shape { border-radius: 3px; transform: rotate(45deg); }
+.lc-marker--incident .lc-marker__diamond-icon { display: block; transform: rotate(-45deg); }
+
+/* order: teardrop pin (point at bottom = iconAnchor) */
+.lc-marker--order .lc-marker__pin {
+  width: 26px;
+  height: 26px;
+  margin: 2px auto 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--mk-bg);
+  color: var(--mk-fg);
+  border: 2px solid hsl(var(--card));
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(45deg);
+  box-shadow: var(--shadow-md);
+}
+.lc-marker--order .lc-marker__pin-icon { display: block; transform: rotate(-45deg); }
+
+/* highlight emphasis (e.g. "your hub") — ring cue, not color-only */
+.lc-marker--highlight .lc-marker__shape,
+.lc-marker--highlight .lc-marker__pin {
+  box-shadow: 0 0 0 4px hsl(var(--ring) / 0.35), var(--shadow-md);
+}
+
+/* ── Token-driven order-marker clusters (buildClusterIcon) ──────────────────
+   Order markers are grouped by react-leaflet-cluster; the cluster bubble shows
+   the contained count and is sized by bucket (small/medium/large). Colors come
+   from --mk-bg/--mk-fg tokens so clusters re-theme with the .dark class
+   (Req 12.2). Default leaflet.markercluster colored styles are intentionally
+   not imported — this token styling replaces them. */
+.lc-cluster {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform var(--motion-fast, 150ms) ease, filter var(--motion-fast, 150ms) ease;
+}
+.lc-cluster:hover,
+.lc-cluster:focus-visible {
+  transform: scale(1.1);
+  filter: drop-shadow(var(--shadow-md));
+  outline: none;
+  z-index: 1000 !important;
+}
+.lc-cluster__bubble {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--mk-bg);
+  color: var(--mk-fg);
+  border: 2px solid hsl(var(--card));
   border-radius: 50%;
-  width: 18px; height: 18px;
-  box-shadow: 0 0 0 2px rgba(210,35,60,.25), 0 2px 6px rgba(0,0,0,.2);
+  box-shadow: 0 0 0 4px hsl(var(--primary) / 0.20), var(--shadow-md);
+  font-weight: 700;
+  line-height: 1;
 }
-.hub-marker.lg {
-  width: 22px; height: 22px;
-  background: var(--red);
-  box-shadow: 0 0 0 4px rgba(210,35,60,.25), 0 2px 8px rgba(0,0,0,.25);
+.lc-cluster--small .lc-cluster__count { font-size: 12px; }
+.lc-cluster--medium .lc-cluster__count { font-size: 14px; }
+.lc-cluster--large .lc-cluster__count { font-size: 16px; }
+
+/* ── Token-driven active route (casing + colored stroke + arrows) ───────────
+   The active delivery route renders as a wider, low-opacity --background casing
+   beneath a colored stroke for legibility against busy basemaps (Req 12.5). The
+   stroke color comes from a token via CSS (so it re-themes with .dark) unless a
+   per-route color is supplied on the SVG stroke attribute. During live tracking
+   the traveled portion is muted (--muted-foreground) and dashed while the
+   remaining portion stays solid and full-weight (Req 12.6). Stroke set in CSS
+   wins over Leaflet's presentation attribute, so only the token modifier
+   classes define a stroke — bare .lc-route-stroke leaves an explicit per-route
+   color (set as the stroke attribute) untouched. */
+.lc-route-casing { stroke: hsl(var(--background)); }
+.lc-route-stroke--primary { stroke: hsl(var(--primary)); }
+.lc-route-stroke--traveled { stroke: hsl(var(--muted-foreground)); }
+
+/* Directional arrowheads sampled along the route (Req 12.5). Non-interactive;
+   the glyph fills with the per-route --mk-fg custom property (token --primary
+   by default) and is rotated inline to the segment bearing. */
+.lc-route-arrow { background: transparent; border: 0; }
+.lc-route-arrow__glyph {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--mk-fg);
+  filter: drop-shadow(0 1px 1px hsl(var(--background) / 0.8));
 }
-.order-marker {
-  background: var(--teal);
-  border: 2px solid #fff;
-  border-radius: 50%;
-  width: 12px; height: 12px;
-  box-shadow: 0 1px 3px rgba(0,0,0,.2);
+.lc-route-arrow__glyph svg { display: block; }
+
+/* ── Token-driven Leaflet popups & tooltips (Req 12.4) ──────────────────────
+   Override Leaflet's default white popup/tooltip chrome with Design_System
+   surface tokens (card background/foreground, border, radius, shadow) so map
+   overlays match the rest of the console and re-theme with the .dark class.
+   Popup/tooltip bodies use token text utilities instead of inline styles. */
+.lc-popup .leaflet-popup-content-wrapper {
+  background: hsl(var(--card));
+  color: hsl(var(--card-foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
 }
-.order-marker.delivered { background: #22c55e; }
-.order-marker.failed { background: var(--red); }
-.order-marker.assigned { background: #2563eb; }
-.driver-marker {
-  background: #0f172a;
-  color: #fff;
-  border: 2px solid #fff;
-  border-radius: 50%;
-  width: 22px; height: 22px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 10px; font-weight: 700;
-  box-shadow: 0 2px 6px rgba(0,0,0,.25);
+.lc-popup .leaflet-popup-content { margin: 10px 12px; line-height: 1.45; }
+.lc-popup .leaflet-popup-tip {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  box-shadow: none;
 }
+.lc-popup a.leaflet-popup-close-button {
+  color: hsl(var(--muted-foreground));
+}
+.lc-popup a.leaflet-popup-close-button:hover {
+  color: hsl(var(--foreground));
+}
+
+.lc-tooltip.leaflet-tooltip {
+  background: hsl(var(--card));
+  color: hsl(var(--card-foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) - 4px);
+  box-shadow: var(--shadow-md);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 8px;
+}
+.lc-tooltip.leaflet-tooltip-top::before { border-top-color: hsl(var(--border)); }
+.lc-tooltip.leaflet-tooltip-bottom::before { border-bottom-color: hsl(var(--border)); }
+.lc-tooltip.leaflet-tooltip-left::before { border-left-color: hsl(var(--border)); }
+.lc-tooltip.leaflet-tooltip-right::before { border-right-color: hsl(var(--border)); }
 
 .empty {
   padding: 28px;
   text-align: center;
-  color: var(--ink-muted);
+  color: hsl(var(--muted-foreground));
   font-size: 13px;
-  border: 1px dashed var(--border);
+  border: 1px dashed hsl(var(--border));
   border-radius: 10px;
-  background: #fbfcfd;
+  background: hsl(var(--card));
 }
 
 /* toolbar */
@@ -318,45 +253,24 @@ a[href*="emergent-badge"] {
   display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap;
 }
 
-.kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
-.small-stat { background: var(--slate-50); border-radius: 8px; padding: 10px 12px; }
-.small-stat .l { font-size: 11px; color: var(--ink-muted); text-transform: uppercase; letter-spacing: .08em; }
-.small-stat .v { font-size: 18px; font-weight: 600; }
-
 /* tabs */
-.tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+.tabs { display: flex; gap: 0; border-bottom: 1px solid hsl(var(--border)); margin-bottom: 16px; }
 .tab {
-  padding: 10px 14px; font-size: 13px; color: var(--ink-muted); cursor: pointer;
+  padding: 10px 14px; font-size: 13px; color: hsl(var(--muted-foreground)); cursor: pointer;
   border-bottom: 2px solid transparent; font-weight: 500;
 }
-.tab:hover { color: var(--ink); }
-.tab.active { color: var(--teal); border-color: var(--teal); }
+.tab:hover { color: hsl(var(--foreground)); }
+.tab.active { color: hsl(var(--primary)); border-color: hsl(var(--primary)); }
 
 /* tag/chip */
 .chip {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 3px 8px; border-radius: 6px; font-size: 11.5px;
-  background: var(--slate-50); color: var(--ink); border: 1px solid var(--border);
+  background: hsl(var(--muted)); color: hsl(var(--foreground)); border: 1px solid hsl(var(--border));
   margin-right: 4px;
 }
 
-/* Map Animations */
-@keyframes marker-pulse {
-  0% { box-shadow: 0 0 0 0 rgba(13, 124, 120, 0.4); }
-  70% { box-shadow: 0 0 0 12px rgba(13, 124, 120, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(13, 124, 120, 0); }
-}
-
-@keyframes marker-float {
-  0%, 100% { transform: translateY(0) rotate(45deg); }
-  50% { transform: translateY(-4px) rotate(45deg); }
-}
-
-.highlight-hub {
-  animation: marker-pulse 2s infinite, marker-float 3s ease-in-out infinite;
-  z-index: 1000 !important;
-}
-
+/* Map zone-highlight animation (MapView highlighted zones) */
 .highlight-zone {
   stroke-dasharray: 20, 10, 5, 10;
   animation: dash-move 15s linear infinite, zone-pulse 3s ease-in-out infinite;
@@ -366,6 +280,11 @@ a[href*="emergent-badge"] {
   0% { fill-opacity: 0.15; }
   50% { fill-opacity: 0.35; }
   100% { fill-opacity: 0.15; }
+}
+
+@keyframes dash-move {
+  from { stroke-dashoffset: 1000; }
+  to { stroke-dashoffset: 0; }
 }
 
 /* Tracking UI */
@@ -378,27 +297,86 @@ a[href*="emergent-badge"] {
 .tracking-dot {
   width: 8px;
   height: 8px;
-  background: #ef4444;
+  background: hsl(var(--destructive));
   border-radius: 50%;
   display: inline-block;
   margin-right: 6px;
   animation: pulse-tracking 1s ease-in-out infinite;
 }
 
-.tracking-active-bar {
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  color: #991b1b;
-  padding: 8px 12px;
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  margin-bottom: 12px;
+/* ───────────────────────────────────────────────────────────────────────────
+ * REDUCED MOTION (Req 7.6)
+ *
+ * While `prefers-reduced-motion: reduce` is requested, disable every animation
+ * that is decorative (does not convey a system-state change) and cap any
+ * remaining state-change motion to <= 300ms.
+ *
+ * Tailwind's `motion-safe:` variants (the Routing.jsx tracking pings) already
+ * self-suppress under reduced motion, so they need no handling here. The rules
+ * below neutralize the hand-written @keyframes loops that are NOT gated, and
+ * make the marker/cluster hover-emphasis transitions instantaneous while still
+ * conveying the hover/focus cue.
+ * ─────────────────────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  /* Decorative infinite keyframe loops — fully disabled (purely ornamental). */
+  .highlight-zone,
+  .tracking-dot {
+    animation: none !important;
+  }
+
+  /* Marker / cluster hover-&-focus emphasis conveys an interaction state, so
+     keep the scale/elevation cue but apply it instantaneously (no transition). */
+  .lc-marker,
+  .lc-marker:hover,
+  .lc-marker:focus-visible,
+  .lc-cluster,
+  .lc-cluster:hover,
+  .lc-cluster:focus-visible {
+    transition: none !important;
+  }
+
+  /* Safety net: cap any remaining state-change transition/animation to <=300ms
+     so no other surface exceeds the reduced-motion budget. */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 300ms !important;
+    transition-duration: 300ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
-@keyframes dash-move {
-  from { stroke-dashoffset: 1000; }
-  to { stroke-dashoffset: 0; }
+/* ───────────────────────────────────────────────────────────────────────────
+ * GLOBAL FOCUS-VISIBLE RING (Req 7.1, 7.3)
+ *
+ * Every interactive control must show a visible keyboard-focus indicator with
+ * a contrast ratio of at least 3:1 against the adjacent background. shadcn/ui
+ * primitives already ship their own `focus-visible:ring-*` utilities; this
+ * global rule guarantees a ring for EVERY remaining focusable element (links,
+ * native controls) and explicitly restores one for the legacy classes that
+ * zero out `outline` for their `:focus` box-shadow styling (.input/.select/
+ * .textarea) or rely on browser defaults (.btn/.tab/.chip).
+ *
+ * The --ring token resolves to teal (light) / brighter teal (dark); both exceed
+ * 3:1 against the page, card, and sidebar surfaces. Placed at the end of the
+ * file so it wins on source order over the legacy `outline:none` declarations
+ * above (equal specificity). `outline` is used (not box-shadow) so the ring is
+ * preserved in Windows High Contrast / forced-colors mode.
+ * ─────────────────────────────────────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+/* Legacy controls: ensure a visible focus-visible ring even though some set
+   `outline:none` (inputs) or have no explicit focus indicator (buttons/tabs/
+   chips). Higher selector count keeps these authoritative. */
+.select:focus-visible,
+.input:focus-visible,
+.textarea:focus-visible,
+.tab:focus-visible,
+.chip:focus-visible,
+button.chip:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
 }

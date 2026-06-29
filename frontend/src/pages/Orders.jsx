@@ -1,8 +1,15 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { http, fmtDate } from "../lib/api";
-import { Modal, Badge } from "../components/UI";
+import { Modal } from "../components/UI";
 import MapView from "../components/MapView";
 import HubPicker from "../components/HubPicker";
+import { PageHeader } from "@/components/composite/PageHeader";
+import { DataTable } from "@/components/composite/DataTable";
+import { StatusBadge } from "@/components/composite/StatusBadge";
+import { ErrorState } from "@/components/composite/ErrorState";
+import { ConfirmDialog } from "@/components/composite/ConfirmDialog";
+import { Button } from "@/components/ui/button";
+import { notifySuccess, notifyError, notifyInfo } from "@/lib/notify";
 
 const SG_DEFAULT = [1.305, 103.83];
 
@@ -32,15 +39,25 @@ export default function Orders() {
   const [selected, setSelected] = useState([]);
   const [manualDriver, setManualDriver] = useState("");
   const [busy, setBusy] = useState(false);
-  const [toast, setToast] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState(null);
   const [geo, setGeo] = useState({ q: "", busy: false, results: [], error: "" });
   const [pinHasMoved, setPinHasMoved] = useState(false);
 
-  const load = async () => {
-    const [o, c, d] = await Promise.all([http.get("/orders"), http.get("/clusters"), http.get("/drivers")]);
-    setOrders(o.data); setClusters(c.data); setDrivers(d.data);
-  };
-  useEffect(() => { load(); }, []);
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(false);
+    try {
+      const [o, c, d] = await Promise.all([http.get("/orders"), http.get("/clusters"), http.get("/drivers")]);
+      setOrders(o.data); setClusters(c.data); setDrivers(d.data);
+    } catch (e) {
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => { load(); }, [load]);
 
   const openNew = () => {
     setForm(emptyForm());
@@ -91,6 +108,7 @@ export default function Orders() {
 
   const addOrder = async () => {
     if (!form.address) return;
+    const entity = `Order to ${form.address}`;
     try {
       setBusy(true);
       await http.post("/orders", {
@@ -101,58 +119,215 @@ export default function Orders() {
         weight_kg: parseFloat(form.weight_kg),
         required_by: new Date(form.required_by).toISOString(),
       });
-      setOpen(false); setToast("Order registered"); load();
+      setOpen(false);
+      notifySuccess("create", entity);
+      load();
+    } catch (e) {
+      notifyError("create", entity, e.response?.data?.detail || e.message);
     } finally { setBusy(false); }
   };
   const doCluster = async () => {
-    setBusy(true);
-    const r = await http.post("/orders/cluster", {});
-    const { count = 0, unassigned = 0, message } = r.data || {};
-    let msg = `Clustering done · ${count} cluster${count === 1 ? "" : "s"}`;
-    if (unassigned > 0) msg += ` · ${unassigned} order${unassigned === 1 ? "" : "s"} outside any zone`;
-    if (message && count === 0) msg = message;
-    setToast(msg); await load(); setBusy(false);
+    try {
+      setBusy(true);
+      const r = await http.post("/orders/cluster", {});
+      const { count = 0, unassigned = 0, message } = r.data || {};
+      let msg = `Clustering done · ${count} cluster${count === 1 ? "" : "s"}`;
+      if (unassigned > 0) msg += ` · ${unassigned} order${unassigned === 1 ? "" : "s"} outside any zone`;
+      if (message && count === 0) msg = message;
+      notifyInfo(msg);
+      await load();
+    } catch (e) {
+      notifyError("update", "orders", e.response?.data?.detail || e.message);
+    } finally { setBusy(false); }
   };
   const doAuto = async () => {
-    setBusy(true);
-    const r = await http.post("/orders/assign-auto");
-    const { count = 0, skipped = [], assignments = [] } = r.data || {};
-    let msg = `Auto-assigned ${count} cluster${count === 1 ? "" : "s"}`;
-    if (assignments.length) {
-      const evCount = assignments.filter(a => a.vehicle_fuel === "ev").length;
-      const zoneMatch = assignments.filter(a => a.zone_match).length;
-      const avgUtil = assignments.reduce((s, a) => s + (a.utilisation_pct || 0), 0) / assignments.length;
-      msg += ` · zone match ${zoneMatch}/${assignments.length} · EV ${evCount}/${assignments.length} · avg fleet utilisation ${avgUtil.toFixed(0)}%`;
-    }
-    if (skipped.length) {
-      msg += ` · ${skipped.length} skipped (no eligible driver)`;
-    }
-    setToast(msg);
-    await load(); setBusy(false);
+    try {
+      setBusy(true);
+      const r = await http.post("/orders/assign-auto");
+      const { count = 0, skipped = [], assignments = [] } = r.data || {};
+      let msg = `Auto-assigned ${count} cluster${count === 1 ? "" : "s"}`;
+      if (assignments.length) {
+        const evCount = assignments.filter(a => a.vehicle_fuel === "ev").length;
+        const zoneMatch = assignments.filter(a => a.zone_match).length;
+        const avgUtil = assignments.reduce((s, a) => s + (a.utilisation_pct || 0), 0) / assignments.length;
+        msg += ` · zone match ${zoneMatch}/${assignments.length} · EV ${evCount}/${assignments.length} · avg fleet utilisation ${avgUtil.toFixed(0)}%`;
+      }
+      if (skipped.length) {
+        msg += ` · ${skipped.length} skipped (no eligible driver)`;
+      }
+      notifyInfo(msg);
+      await load();
+    } catch (e) {
+      notifyError("update", "clusters", e.response?.data?.detail || e.message);
+    } finally { setBusy(false); }
   };
   const doManual = async () => {
     if (!manualDriver || selected.length === 0) return;
-    setBusy(true);
-    await http.post("/orders/assign-manual", { driver_id: manualDriver, order_ids: selected });
-    setToast(`Assigned ${selected.length} orders to driver`); setSelected([]); await load(); setBusy(false);
+    const count = selected.length;
+    try {
+      setBusy(true);
+      await http.post("/orders/assign-manual", { driver_id: manualDriver, order_ids: selected });
+      notifyInfo(`Assigned ${count} order${count === 1 ? "" : "s"} to driver`);
+      setSelected([]);
+      await load();
+    } catch (e) {
+      notifyError("update", `${count} order${count === 1 ? "" : "s"}`, e.response?.data?.detail || e.message);
+    } finally { setBusy(false); }
   };
   const updateStatus = async (o, status) => {
-    await http.put(`/orders/${o.id}/status`, { status });
-    load();
+    try {
+      await http.put(`/orders/${o.id}/status`, { status });
+      notifySuccess("update", `Order ${o.code}`);
+      load();
+    } catch (e) {
+      notifyError("update", `Order ${o.code}`, e.response?.data?.detail || e.message);
+    }
   };
-  const remove = async (id) => { if (!window.confirm("Delete order?")) return; await http.delete(`/orders/${id}`); load(); };
+  const remove = (o) => setPendingDelete(o);
+  const confirmRemove = async () => {
+    const o = pendingDelete;
+    setPendingDelete(null);
+    if (!o) return;
+    const entity = `Order ${o.code}`;
+    try {
+      await http.delete(`/orders/${o.id}`);
+      notifySuccess("delete", entity);
+      load();
+    } catch (e) {
+      notifyError("delete", entity, e.response?.data?.detail || e.message);
+    }
+  };
 
   const dById = Object.fromEntries(drivers.map(d => [d.id, d]));
   const cById = Object.fromEntries(clusters.map(c => [c.id, c]));
   const pendingOrders = orders.filter(o => o.status === "pending");
-
-  useEffect(() => { if (toast) { const t = setTimeout(() => setToast(""), 2500); return () => clearTimeout(t); } }, [toast]);
+  const clusteredOrders = orders.filter(o => o.cluster_id);
 
   const toggleSel = (id) => setSelected(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
 
+  const inboundColumns = [
+    { key: "code", header: "Code", render: (o) => <span className="font-semibold">{o.code}</span> },
+    { key: "address", header: "Address" },
+    { key: "postal_code", header: "Postal" },
+    { key: "weight_kg", header: "Weight", render: (o) => `${o.weight_kg} kg` },
+    { key: "required_by", header: "Required by", render: (o) => <span className="text-muted-foreground">{fmtDate(o.required_by)}</span> },
+    { key: "status", header: "Status", render: (o) => <StatusBadge status={o.status} /> },
+    {
+      key: "driver",
+      header: "Driver",
+      render: (o) => o.driver_id
+        ? <span className="chip">{dById[o.driver_id]?.name || "driver"}</span>
+        : <span className="text-muted-foreground">—</span>,
+    },
+    {
+      key: "actions",
+      header: "",
+      align: "right",
+      render: (o) => (
+        <div className="flex justify-end">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-destructive hover:text-destructive"
+            onClick={() => remove(o)}
+            data-testid={`del-order-${o.id}`}
+          >
+            Delete
+          </Button>
+        </div>
+      ),
+    },
+  ];
+
+  const clusterColumns = [
+    { key: "code", header: "Order Code", render: (o) => <span className="font-semibold">{o.code}</span> },
+    { key: "address", header: "Address" },
+    {
+      key: "zone",
+      header: "Zone",
+      render: (o) => {
+        const c = cById[o.cluster_id];
+        return c?.zone_name ? <span className="chip">{c.zone_name}</span> : <span className="text-muted-foreground">—</span>;
+      },
+    },
+    {
+      key: "hub",
+      header: "Hub",
+      render: (o) => {
+        const c = cById[o.cluster_id];
+        return c?.hub_name ? <span className="chip" data-testid={`cluster-hub-${o.id}`}>{c.hub_name}</span> : <span className="text-muted-foreground">—</span>;
+      },
+    },
+  ];
+
+  const assignmentColumns = [
+    {
+      key: "select",
+      header: (
+        <input type="checkbox" data-testid="select-all-orders"
+          checked={selected.length === pendingOrders.length && pendingOrders.length > 0}
+          onChange={(e) => setSelected(e.target.checked ? pendingOrders.map(o => o.id) : [])} />
+      ),
+      render: (o) => (
+        <input type="checkbox" data-testid={`select-order-${o.id}`}
+          disabled={o.status !== "pending"}
+          checked={selected.includes(o.id)} onChange={() => toggleSel(o.id)} />
+      ),
+    },
+    { key: "code", header: "Code", render: (o) => <span className="font-semibold">{o.code}</span> },
+    { key: "address", header: "Address" },
+    {
+      key: "zone_hub",
+      header: "Zone / Hub",
+      render: (o) => {
+        const c = cById[o.cluster_id];
+        return c ? (
+          <div className="flex flex-wrap gap-1">
+            {c.zone_name && <span className="chip">{c.zone_name}</span>}
+            {c.hub_name && <span className="chip" data-testid={`assign-hub-${o.id}`}>{c.hub_name}</span>}
+          </div>
+        ) : <span className="text-muted-foreground">—</span>;
+      },
+    },
+    {
+      key: "driver",
+      header: "Driver",
+      render: (o) => o.driver_id
+        ? <span className="chip">{dById[o.driver_id]?.name || "driver"}</span>
+        : <span className="text-muted-foreground">—</span>,
+    },
+    { key: "status", header: "Status", render: (o) => <StatusBadge status={o.status} /> },
+  ];
+
+  const trackingColumns = [
+    { key: "code", header: "Code", render: (o) => <span className="font-semibold">{o.code}</span> },
+    { key: "address", header: "Address" },
+    { key: "status", header: "Status", render: (o) => <StatusBadge status={o.status} /> },
+    {
+      key: "driver",
+      header: "Driver",
+      render: (o) => o.driver_id ? dById[o.driver_id]?.name : <span className="text-muted-foreground">—</span>,
+    },
+    {
+      key: "update",
+      header: "Update",
+      render: (o) => (
+        <select className="select h-7 px-1.5 text-xs"
+          value={o.status} data-testid={`status-${o.id}`}
+          onChange={(e) => updateStatus(o, e.target.value)}>
+          <option value="pending">pending</option>
+          <option value="assigned">assigned</option>
+          <option value="delivering">delivering</option>
+          <option value="delivered">delivered</option>
+          <option value="failed">failed</option>
+        </select>
+      ),
+    },
+  ];
+
   return (
     <div>
-      <div className="page-title"><span className="accent"></span>Orders & Dispatching</div>
+      <PageHeader accent title="Orders & Dispatching" />
 
       <div className="tabs">
         <div className={`tab ${tab==='inbound'?'active':''}`} data-testid="tab-inbound" onClick={()=>setTab('inbound')}>Inbound Warehouse</div>
@@ -161,69 +336,48 @@ export default function Orders() {
         <div className={`tab ${tab==='tracking'?'active':''}`} data-testid="tab-tracking" onClick={()=>setTab('tracking')}>Tracking</div>
       </div>
 
-      {toast && <div className="card" style={{ background: "#ecfdf5", borderColor: "#a7f3d0", marginBottom: 12, fontSize: 13 }}>{toast}</div>}
-
       {tab === "inbound" && (
         <div>
           <div className="toolbar">
-            <button className="btn primary" data-testid="add-order-btn" onClick={openNew}>+ Warehouse Entry</button>
+            <Button data-testid="add-order-btn" onClick={openNew}>+ Warehouse Entry</Button>
           </div>
-          <div className="card" style={{ padding: 0 }}>
-            <table className="tbl" data-testid="orders-table">
-              <thead><tr><th>Code</th><th>Address</th><th>Postal</th><th>Weight</th><th>Required by</th><th>Status</th><th>Driver</th><th></th></tr></thead>
-              <tbody>
-                {orders.map(o => (
-                  <tr key={o.id}>
-                    <td style={{ fontWeight: 600 }}>{o.code}</td>
-                    <td>{o.address}</td>
-                    <td>{o.postal_code}</td>
-                    <td>{o.weight_kg} kg</td>
-                    <td className="muted">{fmtDate(o.required_by)}</td>
-                    <td><Badge tone={o.status}>{o.status}</Badge></td>
-                    <td>{o.driver_id ? <span className="chip">{dById[o.driver_id]?.name || "driver"}</span> : <span className="muted">—</span>}</td>
-                    <td style={{ textAlign: "right" }}>
-                      <button className="btn sm ghost" style={{ color: "#b91c1c" }} onClick={() => remove(o.id)} data-testid={`del-order-${o.id}`}>Delete</button>
-                    </td>
-                  </tr>
-                ))}
-                {orders.length === 0 && <tr><td colSpan={8} style={{ padding: 24, textAlign: "center", color: "#64748b" }}>No orders yet.</td></tr>}
-              </tbody>
-            </table>
-          </div>
+          {loadError ? (
+            <ErrorState message="Couldn't load orders. Please try again." onRetry={load} />
+          ) : (
+            <div className="rounded-lg border border-border bg-card" data-testid="orders-table">
+              <DataTable
+                columns={inboundColumns}
+                rows={orders}
+                rowKey={(o) => o.id}
+                isLoading={loading}
+                emptyMessage="No orders yet."
+              />
+            </div>
+          )}
         </div>
       )}
 
       {tab === "clustering" && (
         <div>
           <div className="toolbar">
-            <button className="btn primary" data-testid="run-cluster-btn" disabled={busy} onClick={doCluster}>⚙ Run Clustering</button>
+            <Button data-testid="run-cluster-btn" disabled={busy} onClick={doCluster}>⚙ Run Clustering</Button>
             <span className="muted" style={{ fontSize: 12 }}>Groups orders by zone (point-in-polygon) and picks the closest hub inside that zone</span>
           </div>
           <div className="section">
-            <div className="card" style={{ padding: 0 }}>
-              <table className="tbl" data-testid="clusters-table">
-                <thead><tr><th>Order Code</th><th>Address</th><th>Zone</th><th>Hub</th></tr></thead>
-                <tbody>
-                  {orders
-                    .filter(o => o.cluster_id)
-                    .map(o => {
-                      const c = cById[o.cluster_id];
-                      return (
-                        <tr key={o.id} data-testid={`cluster-row-${o.id}`}>
-                          <td style={{ fontWeight: 600 }}>{o.code}</td>
-                          <td>{o.address}</td>
-                          <td>{c?.zone_name ? <span className="chip">{c.zone_name}</span> : <span className="muted">—</span>}</td>
-                          <td>{c?.hub_name ? <span className="chip" data-testid={`cluster-hub-${o.id}`}>{c.hub_name}</span> : <span className="muted">—</span>}</td>
-                        </tr>
-                      );
-                    })}
-                  {orders.filter(o => o.cluster_id).length === 0 && (
-                    <tr><td colSpan={4} style={{ padding: 20, textAlign: "center", color: "#64748b" }}>Run clustering to assign each pending order to its zone & nearest hub.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-            <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+            {loadError ? (
+              <ErrorState message="Couldn't load orders. Please try again." onRetry={load} />
+            ) : (
+              <div className="rounded-lg border border-border bg-card" data-testid="clusters-table">
+                <DataTable
+                  columns={clusterColumns}
+                  rows={clusteredOrders}
+                  rowKey={(o) => o.id}
+                  isLoading={loading}
+                  emptyMessage="Run clustering to assign each pending order to its zone & nearest hub."
+                />
+              </div>
+            )}
+            <div className="overflow-hidden rounded-lg border border-border bg-card">
               <MapView height={420} orders={orders.filter(o => o.status === 'pending')} />
             </div>
           </div>
@@ -233,81 +387,47 @@ export default function Orders() {
       {tab === "assignment" && (
         <div>
           <div className="toolbar">
-            <button className="btn primary" data-testid="auto-assign-btn" disabled={busy || clusters.length === 0} onClick={doAuto}>⚡ Auto-Assign Clusters</button>
+            <Button data-testid="auto-assign-btn" disabled={busy || clusters.length === 0} onClick={doAuto}>⚡ Auto-Assign Clusters</Button>
             <div style={{ flex: 1 }}></div>
             <span className="muted" style={{ fontSize: 12 }}>Manual:</span>
             <select className="select" style={{ width: 220 }} value={manualDriver} onChange={e => setManualDriver(e.target.value)} data-testid="manual-driver-select">
               <option value="">— choose driver —</option>
               {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
-            <button className="btn" disabled={!manualDriver || selected.length === 0 || busy} onClick={doManual} data-testid="manual-assign-btn">Assign {selected.length || ""} selected</button>
+            <Button variant="outline" disabled={!manualDriver || selected.length === 0 || busy} onClick={doManual} data-testid="manual-assign-btn">Assign {selected.length || ""} selected</Button>
           </div>
-          <div className="card" style={{ padding: 0 }}>
-            <table className="tbl" data-testid="assignment-table">
-              <thead><tr>
-                <th><input type="checkbox" data-testid="select-all-orders"
-                  checked={selected.length === pendingOrders.length && pendingOrders.length > 0}
-                  onChange={(e) => setSelected(e.target.checked ? pendingOrders.map(o => o.id) : [])} /></th>
-                <th>Code</th><th>Address</th><th>Zone / Hub</th><th>Driver</th><th>Status</th>
-              </tr></thead>
-              <tbody>
-                {orders.map(o => {
-                  const c = cById[o.cluster_id];
-                  return (
-                  <tr key={o.id}>
-                    <td><input type="checkbox" data-testid={`select-order-${o.id}`}
-                      disabled={o.status !== "pending"}
-                      checked={selected.includes(o.id)} onChange={() => toggleSel(o.id)} /></td>
-                    <td style={{ fontWeight: 600 }}>{o.code}</td>
-                    <td>{o.address}</td>
-                    <td>
-                      {c ? (
-                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                          {c.zone_name && <span className="chip">{c.zone_name}</span>}
-                          {c.hub_name && <span className="chip" data-testid={`assign-hub-${o.id}`}>{c.hub_name}</span>}
-                        </div>
-                      ) : <span className="muted">—</span>}
-                    </td>
-                    <td>{o.driver_id ? <span className="chip">{dById[o.driver_id]?.name || "driver"}</span> : <span className="muted">—</span>}</td>
-                    <td><Badge tone={o.status}>{o.status}</Badge></td>
-                  </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          {loadError ? (
+            <ErrorState message="Couldn't load orders. Please try again." onRetry={load} />
+          ) : (
+            <div className="rounded-lg border border-border bg-card" data-testid="assignment-table">
+              <DataTable
+                columns={assignmentColumns}
+                rows={orders}
+                rowKey={(o) => o.id}
+                isLoading={loading}
+                emptyMessage="No orders to assign."
+              />
+            </div>
+          )}
         </div>
       )}
 
       {tab === "tracking" && (
         <div className="section">
-          <div className="card" style={{ padding: 0 }}>
-            <table className="tbl" data-testid="tracking-table">
-              <thead><tr><th>Code</th><th>Address</th><th>Status</th><th>Driver</th><th>Update</th></tr></thead>
-              <tbody>
-                {orders.map(o => (
-                  <tr key={o.id}>
-                    <td style={{ fontWeight: 600 }}>{o.code}</td>
-                    <td>{o.address}</td>
-                    <td><Badge tone={o.status}>{o.status}</Badge></td>
-                    <td>{o.driver_id ? dById[o.driver_id]?.name : <span className="muted">—</span>}</td>
-                    <td>
-                      <select className="select" style={{ height: 28, padding: "0 6px", fontSize: 12 }}
-                        value={o.status} data-testid={`status-${o.id}`}
-                        onChange={(e) => updateStatus(o, e.target.value)}>
-                        <option value="pending">pending</option>
-                        <option value="assigned">assigned</option>
-                        <option value="delivering">delivering</option>
-                        <option value="delivered">delivered</option>
-                        <option value="failed">failed</option>
-                      </select>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+          {loadError ? (
+            <ErrorState message="Couldn't load orders. Please try again." onRetry={load} />
+          ) : (
+            <div className="rounded-lg border border-border bg-card" data-testid="tracking-table">
+              <DataTable
+                columns={trackingColumns}
+                rows={orders}
+                rowKey={(o) => o.id}
+                isLoading={loading}
+                emptyMessage="No orders."
+              />
+            </div>
+          )}
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
             <MapView height={520} orders={orders} />
           </div>
         </div>
@@ -315,10 +435,10 @@ export default function Orders() {
 
       <Modal open={open} title="Register a new parcel" onClose={() => setOpen(false)}
         footer={<>
-          <button className="btn" onClick={() => setOpen(false)}>Cancel</button>
-          <button className="btn primary" onClick={addOrder} disabled={busy || !form.address} data-testid="save-order-btn">
+          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button onClick={addOrder} disabled={busy || !form.address} data-testid="save-order-btn">
             {busy ? "Saving…" : "Save"}
-          </button>
+          </Button>
         </>}>
         <div className="field">
           <label className="label">Search customer address (OneMap.gov.sg)</label>
@@ -327,12 +447,12 @@ export default function Orders() {
               value={geo.q} onChange={e => setGeo(g => ({ ...g, q: e.target.value }))}
               onKeyDown={e => e.key === "Enter" && (e.preventDefault(), searchAddress())}
               placeholder="e.g., 313 Somerset, Marina Bay Sands, 60 Airport Blvd…" />
-            <button type="button" className="btn" disabled={geo.busy || geo.q.length < 3}
+            <Button type="button" variant="outline" disabled={geo.busy || geo.q.length < 3}
               onClick={searchAddress} data-testid="order-geocode-btn">
               {geo.busy ? "…" : "Search"}
-            </button>
+            </Button>
           </div>
-          {geo.error && <div style={{ color: "#b91c1c", fontSize: 11.5, marginTop: 6 }}>{geo.error}</div>}
+          {geo.error && <div className="mt-1.5 text-xs text-destructive">{geo.error}</div>}
           {geo.results.length > 0 && (
             <div style={{ marginTop: 6, border: "1px solid var(--border)", borderRadius: 8, maxHeight: 160, overflow: "auto" }}>
               {geo.results.map((r, i) => (
@@ -358,7 +478,7 @@ export default function Orders() {
           <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
             {form.lat.toFixed(5)}, {form.lng.toFixed(5)}
             {form.postal_code && <> · Postal <b>S{form.postal_code}</b></>}
-            {pinHasMoved && <span style={{ color: "#0d7c78" }}> · address updated from pin</span>}
+            {pinHasMoved && <span className="text-primary"> · address updated from pin</span>}
           </div>
         </div>
 
@@ -381,6 +501,16 @@ export default function Orders() {
           </div>
         </div>
       </Modal>
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        destructive
+        title={pendingDelete ? `Delete order ${pendingDelete.code}?` : "Delete order?"}
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmRemove}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }

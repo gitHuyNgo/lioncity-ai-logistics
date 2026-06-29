@@ -7,9 +7,10 @@ const ParticleNetwork = () => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     let animationFrameId;
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
     let particles = [];
-    const particleCount = 100; // Increased density
+    const particleCount = reduceMotion ? 34 : 86;
     const connectionDistance = 140; // Slightly reduced to keep it clean with more particles
     const mouseRadius = 150;
 
@@ -30,8 +31,9 @@ const ParticleNetwork = () => {
         this.size = Math.random() * 2 + 1.5;
         this.speedX = Math.random() * 0.8 - 0.4;
         this.speedY = Math.random() * 0.8 - 0.4;
-        // Brighter, more vibrant teal (Cyan/Teal mix)
-        this.color = 'rgba(45, 212, 191, 0.8)'; 
+        this.color = Math.random() > 0.72
+          ? 'hsla(24, 95%, 53%, 0.72)'
+          : 'hsla(221, 83%, 53%, 0.68)';
       }
 
       update() {
@@ -72,8 +74,7 @@ const ParticleNetwork = () => {
           const distance = Math.sqrt(dx * dx + dy * dy);
 
           if (distance < connectionDistance) {
-            // Brighter lines with higher visibility
-            ctx.strokeStyle = `rgba(45, 212, 191, ${(1 - distance / connectionDistance) * 0.9})`; 
+            ctx.strokeStyle = `hsla(221, 83%, 53%, ${(1 - distance / connectionDistance) * 0.42})`;
             ctx.lineWidth = 0.8;
             ctx.beginPath();
             ctx.moveTo(particles[i].x, particles[i].y);
@@ -88,7 +89,7 @@ const ParticleNetwork = () => {
           const dyMouse = particles[i].y - mouse.y;
           const distanceMouse = Math.sqrt(dxMouse * dxMouse + dyMouse * dyMouse);
           if (distanceMouse < mouseRadius) {
-            ctx.strokeStyle = `rgba(45, 212, 191, ${(1 - distanceMouse / mouseRadius) * 0.8})`; 
+            ctx.strokeStyle = `hsla(24, 95%, 53%, ${(1 - distanceMouse / mouseRadius) * 0.58})`;
             ctx.lineWidth = 1.2;
             ctx.beginPath();
             ctx.moveTo(particles[i].x, particles[i].y);
@@ -97,14 +98,18 @@ const ParticleNetwork = () => {
           }
         }
       }
-      animationFrameId = requestAnimationFrame(animate);
+      if (!reduceMotion) {
+        animationFrameId = requestAnimationFrame(animate);
+      }
+    };
+
+    const onMouseMove = (e) => {
+      mouse.x = e.x;
+      mouse.y = e.y;
     };
 
     window.addEventListener('resize', resize);
-    window.addEventListener('mousemove', (e) => {
-      mouse.x = e.x;
-      mouse.y = e.y;
-    });
+    window.addEventListener('mousemove', onMouseMove);
 
     resize();
     init();
@@ -112,8 +117,8 @@ const ParticleNetwork = () => {
 
     return () => {
       window.removeEventListener('resize', resize);
-      window.removeEventListener('mousemove', () => {});
-      cancelAnimationFrame(animationFrameId);
+      window.removeEventListener('mousemove', onMouseMove);
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
     };
   }, []);
 

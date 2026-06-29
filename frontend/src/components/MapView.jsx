@@ -1,6 +1,18 @@
 import React from "react";
-import { MapContainer, TileLayer, Marker, Popup, Polygon, Polyline, CircleMarker, Tooltip as LTooltip } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, Polygon, Polyline, Tooltip as LTooltip } from "react-leaflet";
+import MarkerClusterGroup from "react-leaflet-cluster";
+import { useTheme } from "next-themes";
 import L from "leaflet";
+// Base markercluster styles for spiderfy/expand animations only. The default
+// colored cluster bubbles (MarkerCluster.Default.css) are intentionally NOT
+// imported — buildClusterIcon + .lc-cluster supply token-driven styling.
+import "leaflet.markercluster/dist/MarkerCluster.css";
+import { Gauge, Shapes, Warehouse, Package, Truck, Route as RouteIcon, AlertTriangle, MapPinOff } from "lucide-react";
+import { mapTheme } from "@/lib/design/mapTheme";
+import { buildMarkerIcon, buildClusterIcon, buildArrowIcon } from "@/lib/design/markerStyles";
+import MapControls from "@/components/MapControls";
+import MapLegend from "@/components/MapLegend";
+import { EmptyState } from "@/components/composite/EmptyState";
 
 // Fix default icon shadows issue when bundling
 delete L.Icon.Default.prototype._getIconUrl;
@@ -12,40 +24,41 @@ L.Icon.Default.mergeOptions({
 
 const SG_CENTER = [1.3521, 103.8198];
 
-const hubMarkerHtml = (color, isDefault, isHighlighted = false) => {
-  const ring = isDefault
-    ? `box-shadow: 0 0 0 4px ${color}33, 0 2px 8px rgba(0,0,0,.3);`
-    : `box-shadow: 0 0 0 2px ${color}33, 0 1px 4px rgba(0,0,0,.25);`;
-  const size = isDefault ? 24 : 20;
-  const highlightClass = isHighlighted ? "highlight-hub" : "";
-  
-  return `<div class="${highlightClass}" style="
-      background:${color};
-      border:3px solid #fff;
-      width:${size}px;height:${size}px;
-      border-radius:5px;
-      transform:rotate(45deg);
-      ${isHighlighted ? '' : ring}
-    "></div>`;
-};
-
-const buildHubIcon = (color = "#0d7c78", isDefault = false, isHighlighted = false) =>
-  L.divIcon({
-    className: "",
-    html: hubMarkerHtml(color, isDefault, isHighlighted),
-    iconSize: [isDefault ? 24 : 20, isDefault ? 24 : 20],
-    iconAnchor: [isDefault ? 12 : 10, isDefault ? 12 : 10],
-  });
-
-const orderIcon = (status = "pending") =>
-  L.divIcon({ className: "", html: `<div class="order-marker ${status}"></div>`, iconSize: [12, 12] });
-const driverIcon = (initial = "D") =>
-  L.divIcon({ className: "", html: `<div class="driver-marker">${initial}</div>`, iconSize: [22, 22] });
-
 // Traffic speed bands color
 function speedColor(band) {
   const colors = ["#b91c1c", "#ef4444", "#f97316", "#f59e0b", "#eab308", "#84cc16", "#22c55e", "#16a34a"];
   return colors[Math.min(Math.max(band - 1, 0), 7)];
+}
+
+// Compute the clockwise screen bearing (0 = up/north) from point a→b so a
+// triangle glyph can be rotated to point along the direction of travel. The
+// longitude delta is scaled by cos(latitude) to approximate the Web-Mercator
+// horizontal stretch; exact projection is unnecessary for a directional cue.
+function segmentAngle(a, b) {
+  const dLat = b[0] - a[0];
+  const dLng = (b[1] - a[1]) * Math.cos((((a[0] + b[0]) / 2) * Math.PI) / 180);
+  return (Math.atan2(dLng, dLat) * 180) / Math.PI;
+}
+
+// Sample evenly-spaced directional arrows along a route geometry (Req 12.5).
+// Returns at most ~10 arrows positioned at segment midpoints with the bearing
+// of that segment, keeping the overlay lightweight regardless of route length.
+function getRouteArrows(geometry = []) {
+  if (!Array.isArray(geometry) || geometry.length < 2) return [];
+  const maxArrows = 10;
+  const segCount = geometry.length - 1;
+  const step = Math.max(1, Math.round(segCount / maxArrows));
+  const arrows = [];
+  for (let i = step; i < segCount; i += step) {
+    const a = geometry[i];
+    const b = geometry[i + 1] || geometry[i];
+    if (!a || !b) continue;
+    arrows.push({
+      position: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2],
+      angle: segmentAngle(a, b),
+    });
+  }
+  return arrows;
 }
 
 export default function MapView({
@@ -61,14 +74,105 @@ export default function MapView({
   fitTo = null,
   highlight = {},         // { hubId, zoneId }
   tracking = null,        // { driver_id, location: {lat, lng} }
+  layers = undefined,     // optional controlled visibility { traffic, zones, hubs, orders }
+  emptyMessage = "No map data to display.",
 }) {
   const center = SG_CENTER;
+  const { resolvedTheme } = useTheme();
+  const tiles = mapTheme(resolvedTheme);
 
-  // Helper to split geometry for tracking
+  // Layer visibility — MapView owns the state and passes it to MapControls.
+  // Defaults to all-visible; an optional `layers` prop seeds/controls it so
+  // callers that omit the prop keep the existing always-visible behavior.
+  const DEFAULT_LAYERS = React.useMemo(
+    () => ({ traffic: true, zones: true, hubs: true, orders: true }),
+    []
+  );
+  const [layerState, setLayerState] = React.useState(() => ({
+    ...DEFAULT_LAYERS,
+    ...(layers || {}),
+  }));
+  React.useEffect(() => {
+    setLayerState({ ...DEFAULT_LAYERS, ...(layers || {}) });
+  }, [layers, DEFAULT_LAYERS]);
+  const toggleLayer = React.useCallback((key) => {
+    setLayerState((s) => ({ ...s, [key]: !s[key] }));
+  }, []);
+
+  const driversWithLocation = drivers.filter((d) => d.location);
+
+  // Which toggleable categories actually exist in the current data.
+  const present = {
+    traffic: speedBands.length > 0,
+    zones: zones.length > 0,
+    hubs: hubs.length > 0 || showHub,
+    orders: orders.length > 0,
+  };
+
+  // Whether there is anything at all to show on the map (Req 10.5).
+  const hasContent =
+    orders.length > 0 ||
+    driversWithLocation.length > 0 ||
+    zones.length > 0 ||
+    routes.length > 0 ||
+    hubs.length > 0 ||
+    showHub ||
+    incidents.length > 0 ||
+    speedBands.length > 0;
+
+  // Collect the currently-visible lat/lng points so MapControls' fit-to-content
+  // can frame exactly what is on the map. Honors the layer visibility state.
+  const getFitPoints = React.useCallback(() => {
+    const pts = [];
+    const push = (lat, lng) => {
+      if (Number.isFinite(lat) && Number.isFinite(lng)) pts.push([lat, lng]);
+    };
+    if (layerState.orders) orders.forEach((o) => push(o.lat, o.lng));
+    if (layerState.hubs) hubs.forEach((h) => push(h.lat, h.lng));
+    if (layerState.zones) {
+      zones.forEach((z) => (z.polygon || []).forEach((p) => push(p[0], p[1])));
+    }
+    if (layerState.traffic) {
+      speedBands.forEach((s) => {
+        push(s.StartLat, s.StartLon);
+        push(s.EndLat, s.EndLon);
+      });
+    }
+    driversWithLocation.forEach((d) => push(d.location.lat, d.location.lng));
+    incidents.forEach((e) => push(e.Latitude, e.Longitude));
+    routes.forEach((r) => (r.geometry || []).forEach((p) => push(p[0], p[1])));
+    return pts;
+  }, [orders, hubs, zones, speedBands, driversWithLocation, incidents, routes, layerState]);
+
+  // Build the legend categories from what is currently shown (presence +
+  // visibility). Swatches and icons resolve through Design_Tokens.
+  const legendCategories = [];
+  if (present.orders && layerState.orders)
+    legendCategories.push({ id: "orders", label: "Orders", swatch: "hsl(var(--chart-3))", icon: Package });
+  if (present.hubs && layerState.hubs)
+    legendCategories.push({ id: "hubs", label: "Hubs", swatch: "hsl(var(--primary))", icon: Warehouse });
+  if (present.zones && layerState.zones)
+    legendCategories.push({ id: "zones", label: "Zones", swatch: "hsl(var(--primary))", icon: Shapes });
+  if (present.traffic && layerState.traffic)
+    legendCategories.push({ id: "traffic", label: "Traffic", swatch: "hsl(var(--chart-4))", icon: Gauge });
+  if (routes.length > 0)
+    legendCategories.push({ id: "routes", label: "Routes", swatch: "hsl(var(--primary))", icon: RouteIcon });
+  if (driversWithLocation.length > 0)
+    legendCategories.push({ id: "drivers", label: "Drivers", swatch: "hsl(var(--primary))", icon: Truck });
+  if (incidents.length > 0)
+    legendCategories.push({ id: "incidents", label: "Incidents", swatch: "hsl(var(--destructive))", icon: AlertTriangle });
+
+  // Helper to split geometry for tracking. Returns segments described by intent
+  // (traveled vs. remaining/full) rather than raw colors — the casing + colored
+  // stroke and token classes are applied at render time (Req 12.5, 12.6). A
+  // per-route `color` is honored for the remaining/full stroke when provided;
+  // the traveled portion is always muted via the --muted-foreground token.
   const getRouteSegments = (routeRecord) => {
     const geometry = routeRecord.geometry || [];
+    const explicitColor = routeRecord.color || null;
+
     if (!tracking || tracking.driver_id !== routeRecord.driver_id || !tracking.location || geometry.length < 2) {
-      return [{ positions: geometry, color: routeRecord.color || "#0d7c78", opacity: 0.85, weight: 4 }];
+      return [{ positions: geometry, kind: "remaining", explicitColor, weight: 4, key: "full" }];
     }
 
     const currentLoc = [tracking.location.lat, tracking.location.lng];
@@ -89,20 +193,21 @@ export default function MapView({
     const remaining = geometry.slice(closestIdx);
 
     return [
-      { positions: traveled, color: "#94a3b8", opacity: 0.4, weight: 3, key: 'traveled' },
-      { positions: remaining, color: routeRecord.color || "#0d7c78", opacity: 0.9, weight: 5, key: 'remaining' }
+      { positions: traveled, kind: "traveled", weight: 4, key: "traveled" },
+      { positions: remaining, kind: "remaining", explicitColor, weight: 5, key: "remaining" },
     ];
   };
 
   return (
-    <div className="map-wrap" style={{ height }}>
-      <MapContainer center={center} zoom={12} style={{ height: "100%", width: "100%" }} scrollWheelZoom>
+    <div className="map-wrap relative w-full" style={{ height }}>
+      <MapContainer center={center} zoom={12} zoomControl={false} style={{ height: "100%", width: "100%" }} scrollWheelZoom>
         <TileLayer
-          attribution='&copy; OpenStreetMap &copy; CARTO'
-          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+          key={tiles.variant}
+          attribution={tiles.attribution}
+          url={tiles.url}
         />
 
-        {speedBands.map((s, i) => (
+        {layerState.traffic && speedBands.map((s, i) => (
           <Polyline
             key={`sb-${i}`}
             positions={[[s.StartLat, s.StartLon], [s.EndLat, s.EndLon]]}
@@ -110,7 +215,7 @@ export default function MapView({
           />
         ))}
 
-        {zones.map((z) => {
+        {layerState.zones && zones.map((z) => {
           const isHighlighted = (highlight.zoneIds || []).includes(z.id) || highlight.zoneId === z.id;
           return (
             <Polygon 
@@ -123,81 +228,150 @@ export default function MapView({
                 className: isHighlighted ? "highlight-zone" : ""
               }}
             >
-              <LTooltip sticky>{z.name} {isHighlighted && " (Your Zone)"}</LTooltip>
+              <LTooltip sticky className="lc-tooltip">{z.name} {isHighlighted && " (Your Zone)"}</LTooltip>
             </Polygon>
           );
         })}
 
         {routes.map((r, i) => (
           <React.Fragment key={`rt-wrap-${i}`}>
-            {getRouteSegments(r).map((seg) => (
-              <Polyline 
-                key={`rt-${i}-seg-${seg.key || 'full'}`} 
-                positions={seg.positions}
-                pathOptions={{ color: seg.color, weight: seg.weight, opacity: seg.opacity }} 
+            {getRouteSegments(r).map((seg) => {
+              const isTraveled = seg.kind === "traveled";
+              // Casing: a wider, lower-opacity --background stroke beneath the
+              // colored line for legibility against busy basemaps (Req 12.5).
+              // Colored stroke: token --primary (or --muted-foreground when
+              // traveled) via CSS class so it re-themes; an explicit per-route
+              // color overrides the token when supplied.
+              const strokeClass = isTraveled
+                ? "lc-route-stroke lc-route-stroke--traveled"
+                : seg.explicitColor
+                ? "lc-route-stroke"
+                : "lc-route-stroke lc-route-stroke--primary";
+              const strokeOptions = {
+                className: strokeClass,
+                weight: seg.weight,
+                opacity: isTraveled ? 0.6 : 0.95,
+                lineCap: "round",
+                lineJoin: "round",
+                dashArray: isTraveled ? "6 9" : null,
+              };
+              if (!isTraveled && seg.explicitColor) strokeOptions.color = seg.explicitColor;
+              return (
+                <React.Fragment key={`rt-${i}-seg-${seg.key}`}>
+                  <Polyline
+                    positions={seg.positions}
+                    interactive={false}
+                    pathOptions={{
+                      className: "lc-route-casing",
+                      weight: seg.weight + 5,
+                      opacity: 0.55,
+                      lineCap: "round",
+                      lineJoin: "round",
+                    }}
+                  />
+                  <Polyline positions={seg.positions} pathOptions={strokeOptions} />
+                </React.Fragment>
+              );
+            })}
+            {getRouteArrows(r.geometry).map((a, ai) => (
+              <Marker
+                key={`rt-${i}-arrow-${ai}`}
+                position={a.position}
+                icon={buildArrowIcon(a.angle, r.color || undefined)}
+                interactive={false}
+                keyboard={false}
               />
             ))}
           </React.Fragment>
         ))}
 
-        {hubs.map((h) => {
+        {layerState.hubs && hubs.map((h) => {
           const isHighlighted = highlight.hubId === h.id;
           return (
-            <Marker key={h.id} position={[h.lat, h.lng]} icon={buildHubIcon(h.color || "#0d7c78", !!h.is_default, isHighlighted)}>
-              <Popup>
-                <div style={{ fontSize: 12 }}>
-                  <div style={{ fontWeight: 600 }}>
-                    <span style={{ display: "inline-block", width: 9, height: 9, background: h.color || "#0d7c78", borderRadius: 2, marginRight: 6, verticalAlign: "middle" }}></span>
-                    {h.name} {h.is_default && <span style={{ color: "#d2233c" }}>· default</span>}
-                    {isHighlighted && <span style={{ color: "var(--teal)", marginLeft: 6 }}>· YOUR HUB</span>}
+            <Marker key={h.id} position={[h.lat, h.lng]} icon={buildMarkerIcon("hub", { isDefault: !!h.is_default, isHighlighted, color: h.color })}>
+              <Popup className="lc-popup">
+                <div className="text-xs text-foreground space-y-0.5">
+                  <div className="font-semibold flex items-center gap-1.5">
+                    <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: h.color || "hsl(var(--primary))" }}></span>
+                    <span>{h.name}</span>
+                    {h.is_default && <span className="text-destructive">· default</span>}
+                    {isHighlighted && <span className="text-primary">· YOUR HUB</span>}
                   </div>
-                  {h.address && <div style={{ color: "#475569" }}>{h.address}</div>}
-                  <div style={{ color: "#64748b" }}>{h.lat.toFixed(4)}, {h.lng.toFixed(4)}</div>
+                  {h.address && <div className="text-muted-foreground">{h.address}</div>}
+                  <div className="text-muted-foreground">{h.lat.toFixed(4)}, {h.lng.toFixed(4)}</div>
                 </div>
               </Popup>
             </Marker>
           );
         })}
 
-        {showHub && hubs.length === 0 && (
-          <Marker position={[1.3521, 103.8198]} icon={buildHubIcon("#d2233c", true)}>
-            <Popup>Central Hub</Popup>
+        {layerState.hubs && showHub && hubs.length === 0 && (
+          <Marker position={[1.3521, 103.8198]} icon={buildMarkerIcon("hub", { isDefault: true })}>
+            <Popup className="lc-popup">Central Hub</Popup>
           </Marker>
         )}
 
-        {orders.map((o) => (
-          <Marker key={o.id} position={[o.lat, o.lng]} icon={orderIcon(o.status)}>
-            <Popup>
-              <div style={{ fontSize: 12 }}>
-                <div style={{ fontWeight: 600 }}>{o.code}</div>
-                <div>{o.address}</div>
-                <div style={{ color: "#64748b" }}>Postal {o.postal_code} · {o.weight_kg} kg</div>
-                <div>Status: <b>{o.status}</b></div>
-                {o.sequence && <div>Sequence: #{o.sequence}</div>}
-              </div>
-            </Popup>
-          </Marker>
-        ))}
+        {layerState.orders && (
+        <MarkerClusterGroup
+          chunkedLoading
+          showCoverageOnHover={false}
+          maxClusterRadius={50}
+          iconCreateFunction={(cluster) => buildClusterIcon(cluster.getChildCount())}
+        >
+          {orders.map((o) => (
+            <Marker key={o.id} position={[o.lat, o.lng]} icon={buildMarkerIcon("order", { status: o.status })}>
+              <Popup className="lc-popup">
+                <div className="text-xs text-foreground space-y-0.5">
+                  <div className="font-semibold">{o.code}</div>
+                  <div>{o.address}</div>
+                  <div className="text-muted-foreground">Postal {o.postal_code} · {o.weight_kg} kg</div>
+                  <div>Status: <b className="font-semibold">{o.status}</b></div>
+                  {o.sequence && <div>Sequence: #{o.sequence}</div>}
+                </div>
+              </Popup>
+            </Marker>
+          ))}
+        </MarkerClusterGroup>
+        )}
 
-        {drivers.filter(d => d.location).map((d) => (
-          <Marker key={d.id} position={[d.location.lat, d.location.lng]} icon={driverIcon((d.name || "?")[0])}>
-            <Popup>
-              <div style={{ fontSize: 12 }}>
-                <div style={{ fontWeight: 600 }}>{d.name}</div>
+        {driversWithLocation.map((d) => (
+          <Marker key={d.id} position={[d.location.lat, d.location.lng]} icon={buildMarkerIcon("driver", { initial: (d.name || "?")[0] })}>
+            <Popup className="lc-popup">
+              <div className="text-xs text-foreground space-y-0.5">
+                <div className="font-semibold">{d.name}</div>
                 <div>Status: {d.status}</div>
-                <div>Last update: {d.location.updated_at}</div>
+                <div className="text-muted-foreground">Last update: {d.location.updated_at}</div>
               </div>
             </Popup>
           </Marker>
         ))}
 
         {incidents.map((e, i) => (
-          <CircleMarker key={`inc-${i}`} center={[e.Latitude, e.Longitude]} radius={5}
-            pathOptions={{ color: "#d2233c", fillColor: "#d2233c", fillOpacity: 0.7 }}>
-            <Popup><div style={{ fontSize: 11, maxWidth: 260 }}><b>{e.Type}</b><br/>{e.Message}</div></Popup>
-          </CircleMarker>
+          <Marker key={`inc-${i}`} position={[e.Latitude, e.Longitude]} icon={buildMarkerIcon("incident")}>
+            <Popup className="lc-popup"><div className="text-xs text-foreground max-w-[260px]"><b className="font-semibold">{e.Type}</b><br/>{e.Message}</div></Popup>
+          </Marker>
         ))}
+
+        <MapControls
+          layers={layerState}
+          present={present}
+          onToggleLayer={toggleLayer}
+          getFitPoints={getFitPoints}
+        />
+        <MapLegend categories={legendCategories} />
       </MapContainer>
+
+      {!hasContent && (
+        <div className="pointer-events-none absolute inset-0 z-[1100] flex items-center justify-center p-4">
+          <div className="pointer-events-auto w-full max-w-sm">
+            <EmptyState
+              title="No map data"
+              message={emptyMessage}
+              icon={MapPinOff}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

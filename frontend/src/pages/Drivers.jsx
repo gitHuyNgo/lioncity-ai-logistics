@@ -1,7 +1,14 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { http } from "../lib/api";
-import { Modal, Badge } from "../components/UI";
+import { Modal } from "../components/UI";
 import { useAuth } from "../context/AuthContext";
+import { PageHeader } from "@/components/composite/PageHeader";
+import { DataTable } from "@/components/composite/DataTable";
+import { StatusBadge } from "@/components/composite/StatusBadge";
+import { ErrorState } from "@/components/composite/ErrorState";
+import { ConfirmDialog } from "@/components/composite/ConfirmDialog";
+import { Button } from "@/components/ui/button";
+import { notifySuccess, notifyError } from "@/lib/notify";
 
 export default function Drivers() {
   const { user } = useAuth();
@@ -12,31 +19,42 @@ export default function Drivers() {
   const [form, setForm] = useState({ name: "", phone: "", license_type: "B", zone_id: "" });
   const [open, setOpen] = useState(false);
   const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState(null);
 
   const canMutate = user?.role === "super_admin" || user?.role === "hub_manager";
 
   const load = useCallback(async () => {
-    const [d, v, z] = await Promise.all([http.get("/drivers"), http.get("/vehicles"), http.get("/zones")]);
-    let filteredDrivers = d.data;
+    setLoading(true);
+    setLoadError(false);
+    try {
+      const [d, v, z] = await Promise.all([http.get("/drivers"), http.get("/vehicles"), http.get("/zones")]);
+      let filteredDrivers = d.data;
 
-    if (user?.role === "hub_manager" && user.reference_id) {
-       const hmRes = await http.get("/hub-managers");
-       const manager = hmRes.data.find(m => m.id === user.reference_id);
-       if (manager) {
-         filteredDrivers = d.data.filter(dr => dr.hub_manager_id === manager.id);
-       }
-    } else if (user?.role === "shipper" && user.reference_id) {
-       const driver = d.data.find(dr => dr.id === user.reference_id);
-       if (driver && driver.zone_id) {
-         filteredDrivers = d.data.filter(dr => dr.zone_id === driver.zone_id);
-       } else {
-         filteredDrivers = d.data.filter(dr => dr.id === user.reference_id);
-       }
+      if (user?.role === "hub_manager" && user.reference_id) {
+        const hmRes = await http.get("/hub-managers");
+        const manager = hmRes.data.find(m => m.id === user.reference_id);
+        if (manager) {
+          filteredDrivers = d.data.filter(dr => dr.hub_manager_id === manager.id);
+        }
+      } else if (user?.role === "shipper" && user.reference_id) {
+        const driver = d.data.find(dr => dr.id === user.reference_id);
+        if (driver && driver.zone_id) {
+          filteredDrivers = d.data.filter(dr => dr.zone_id === driver.zone_id);
+        } else {
+          filteredDrivers = d.data.filter(dr => dr.id === user.reference_id);
+        }
+      }
+
+      setDrivers(filteredDrivers);
+      setVehicles(v.data);
+      setZones(z.data);
+    } catch (e) {
+      setLoadError(true);
+    } finally {
+      setLoading(false);
     }
-
-    setDrivers(filteredDrivers); 
-    setVehicles(v.data); 
-    setZones(z.data);
   }, [user]);
 
   useEffect(() => { load(); }, [load]);
@@ -46,103 +64,190 @@ export default function Drivers() {
 
   const save = async () => {
     if (!canMutate) return;
+    const entity = `Driver "${form.name}"`;
     try {
       setErr("");
       const payload = { ...form, zone_id: form.zone_id || null };
       if (editing) await http.put(`/drivers/${editing.id}`, payload);
       else await http.post("/drivers", payload);
-      setOpen(false); load();
-    } catch (e) { setErr(e.response?.data?.detail || "Error"); }
+      setOpen(false);
+      notifySuccess(editing ? "update" : "create", entity);
+      load();
+    } catch (e) {
+      const reason = e.response?.data?.detail || "Error";
+      setErr(reason);
+      notifyError(editing ? "update" : "create", entity, reason);
+    }
   };
-  const setStatus = async (d, status) => { 
+
+  const setStatus = async (d, status) => {
     // Drivers can only update their own status if role is shipper
     if (user?.role === "shipper" && d.id !== user.reference_id) return;
-    await http.put(`/drivers/${d.id}/status`, { status }); load(); 
+    try {
+      await http.put(`/drivers/${d.id}/status`, { status });
+      load();
+    } catch (e) {
+      notifyError("update", `Driver "${d.name}"`, e.response?.data?.detail || e.message);
+    }
   };
-  const remove = async (id) => { 
+
+  const remove = (d) => {
     if (!canMutate) return;
-    if (!window.confirm("Delete this driver?")) return; 
-    await http.delete(`/drivers/${id}`); load(); 
+    setPendingDelete(d);
+  };
+
+  const confirmRemove = async () => {
+    const d = pendingDelete;
+    setPendingDelete(null);
+    if (!d) return;
+    const entity = `Driver "${d.name}"`;
+    try {
+      await http.delete(`/drivers/${d.id}`);
+      notifySuccess("delete", entity);
+      load();
+    } catch (e) {
+      notifyError("delete", entity, e.response?.data?.detail || e.message);
+    }
   };
 
   const vById = Object.fromEntries(vehicles.map(v => [v.id, v]));
   const zById = Object.fromEntries(zones.map(z => [z.id, z]));
 
+  const columns = [
+    {
+      key: "name",
+      header: "Name",
+      render: (d) => {
+        const isSelf = user?.reference_id === d.id;
+        return (
+          <span className="font-medium">
+            {d.name}
+            {isSelf && (
+              <span className="ml-1.5 rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                You
+              </span>
+            )}
+          </span>
+        );
+      },
+    },
+    { key: "phone", header: "Phone", render: (d) => <span className="text-muted-foreground">{d.phone}</span> },
+    { key: "license_type", header: "License" },
+    {
+      key: "status",
+      header: "Status",
+      render: (d) => {
+        const isSelf = user?.reference_id === d.id;
+        return canMutate || isSelf ? (
+          <select
+            className="select h-7 px-2 text-xs"
+            data-testid={`driver-status-${d.id}`}
+            value={d.status}
+            onChange={(e) => setStatus(d, e.target.value)}
+          >
+            <option value="available">Available</option>
+            <option value="delivering">Delivering</option>
+            <option value="off_duty">Off-duty</option>
+          </select>
+        ) : (
+          <StatusBadge status={d.status} />
+        );
+      },
+    },
+    {
+      key: "assigned_fleet",
+      header: "Assigned Fleet",
+      render: (d) => {
+        const veh = d.vehicle_id ? vById[d.vehicle_id] : null;
+        return veh ? (
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[12.5px] font-semibold">{veh.plate}</span>
+            <div className="flex flex-wrap items-center gap-1">
+              <span className="text-[11px] capitalize text-muted-foreground">{veh.type}</span>
+              <StatusBadge status={veh.fuel_type} />
+              <span className="text-[11px] text-muted-foreground">· {veh.capacity_kg} kg</span>
+            </div>
+          </div>
+        ) : (
+          <span className="text-muted-foreground">Unassigned</span>
+        );
+      },
+    },
+    {
+      key: "zone",
+      header: "Zone",
+      render: (d) => {
+        const zone = d.zone_id ? zById[d.zone_id] : null;
+        return zone ? (
+          <span
+            className="chip"
+            style={{ background: `${zone.color}22`, borderColor: zone.color }}
+          >
+            <span
+              className="mr-1 inline-block h-2 w-2 rounded-[2px]"
+              style={{ background: zone.color }}
+            />
+            {zone.name}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        );
+      },
+    },
+  ];
+
+  if (canMutate) {
+    columns.push({
+      key: "actions",
+      header: "",
+      align: "right",
+      render: (d) => (
+        <div className="flex justify-end gap-1">
+          <Button variant="ghost" size="sm" onClick={() => openEdit(d)} data-testid={`edit-driver-${d.id}`}>Edit</Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-destructive hover:text-destructive"
+            onClick={() => remove(d)}
+            data-testid={`del-driver-${d.id}`}
+          >
+            Delete
+          </Button>
+        </div>
+      ),
+    });
+  }
+
   return (
     <div>
-      <div className="page-title"><span className="accent"></span>{user?.role === "shipper" ? "Team & Colleagues" : "Shipper Management"}</div>
+      <PageHeader
+        accent
+        title={user?.role === "shipper" ? "Team & Colleagues" : "Shipper Management"}
+        actions={canMutate && (
+          <Button data-testid="add-driver-btn" onClick={openNew}>+ Add Driver</Button>
+        )}
+      />
 
-      <div className="toolbar">
-        {canMutate && <button className="btn primary" data-testid="add-driver-btn" onClick={openNew}>+ Add Driver</button>}
-      </div>
-
-      <div className="card" style={{ padding: 0 }}>
-        <table className="tbl" data-testid="drivers-table">
-          <thead><tr>
-            <th>Name</th><th>Phone</th><th>License</th><th>Status</th><th>Assigned Fleet</th><th>Zone</th>{canMutate && <th></th>}
-          </tr></thead>
-          <tbody>
-            {drivers.map(d => {
-              const veh = d.vehicle_id ? vById[d.vehicle_id] : null;
-              const zone = d.zone_id ? zById[d.zone_id] : null;
-              const isSelf = user?.reference_id === d.id;
-              
-              return (
-                <tr key={d.id} style={isSelf ? { background: "var(--teal-ink)08" } : {}}>
-                  <td style={{ fontWeight: 500 }}>{d.name} {isSelf && <Badge tone="teal" style={{ marginLeft: 6 }}>You</Badge>}</td>
-                  <td className="muted">{d.phone}</td>
-                  <td>{d.license_type}</td>
-                  <td>
-                    {canMutate || isSelf ? (
-                      <select className="select" style={{ height: 28, padding: "0 8px", fontSize: 12 }}
-                        data-testid={`driver-status-${d.id}`}
-                        value={d.status} onChange={(e) => setStatus(d, e.target.value)}>
-                        <option value="available">Available</option>
-                        <option value="delivering">Delivering</option>
-                        <option value="off_duty">Off-duty</option>
-                      </select>
-                    ) : (
-                      <Badge tone={d.status}>{d.status}</Badge>
-                    )}
-                  </td>
-                  <td>
-                    {veh ? (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                        <span style={{ fontWeight: 600, fontSize: 12.5 }}>{veh.plate}</span>
-                        <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
-                          <span className="muted" style={{ fontSize: 11, textTransform: "capitalize" }}>{veh.type}</span>
-                          <Badge tone={veh.fuel_type} >{veh.fuel_type.toUpperCase()}</Badge>
-                          <span className="muted" style={{ fontSize: 11 }}>· {veh.capacity_kg} kg</span>
-                        </div>
-                      </div>
-                    ) : <span className="muted">Unassigned</span>}
-                  </td>
-                  <td>
-                    {zone ? (
-                      <span className="chip" style={{ background: `${zone.color}22`, borderColor: zone.color }}>
-                        <span style={{ width: 8, height: 8, background: zone.color, borderRadius: 2, display: "inline-block", marginRight: 4 }}></span>
-                        {zone.name}
-                      </span>
-                    ) : <span className="muted">—</span>}
-                  </td>
-                  {canMutate && (
-                    <td style={{ textAlign: "right" }}>
-                      <button className="btn sm ghost" onClick={() => openEdit(d)} data-testid={`edit-driver-${d.id}`}>Edit</button>
-                      <button className="btn sm ghost" style={{ color: "#b91c1c" }} onClick={() => remove(d.id)} data-testid={`del-driver-${d.id}`}>Delete</button>
-                    </td>
-                  )}
-                </tr>
-              );
-            })}
-            {drivers.length === 0 && <tr><td colSpan={canMutate ? 7 : 6} style={{ padding: 24, textAlign: "center", color: "#64748b" }}>No drivers.</td></tr>}
-          </tbody>
-        </table>
+      <div className="mt-4">
+        {loadError ? (
+          <ErrorState message="Couldn't load drivers. Please try again." onRetry={load} />
+        ) : (
+          <div className="rounded-lg border border-border bg-card" data-testid="drivers-table">
+            <DataTable
+              columns={columns}
+              rows={drivers}
+              rowKey={(d) => d.id}
+              isLoading={loading}
+              emptyMessage="No drivers."
+            />
+          </div>
+        )}
       </div>
 
       <Modal open={open} title={editing ? "Edit Driver" : "New Driver"} onClose={() => setOpen(false)}
         footer={<>
-          <button className="btn" onClick={() => setOpen(false)}>Cancel</button>
-          <button className="btn primary" onClick={save} data-testid="save-driver-btn">{editing ? "Save" : "Create"}</button>
+          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button onClick={save} data-testid="save-driver-btn">{editing ? "Save" : "Create"}</Button>
         </>}>
         <div className="row">
           <div className="field"><label className="label">Full name</label>
@@ -166,8 +271,18 @@ export default function Drivers() {
         <div className="muted" style={{ fontSize: 11.5 }}>
           Tip: license <b>B</b> is the most flexible — drivers can be matched to motorbikes <em>and</em> vans during auto-assignment.
         </div>
-        {err && <div style={{ color: "#b91c1c", fontSize: 12 }}>{err}</div>}
+        {err && <div className="text-xs text-destructive">{err}</div>}
       </Modal>
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        destructive
+        title={pendingDelete ? `Delete driver "${pendingDelete.name}"?` : "Delete this driver?"}
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmRemove}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }
