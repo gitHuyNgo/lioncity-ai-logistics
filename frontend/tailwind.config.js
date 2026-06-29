@@ -12,6 +12,27 @@ module.exports = {
   			md: 'calc(var(--radius) - 2px)',
   			sm: 'calc(var(--radius) - 4px)'
   		},
+  		fontFamily: {
+  			sans: 'var(--font-sans)',
+  			serif: 'var(--font-serif)'
+  		},
+  		spacing: {
+  			'token-1': 'var(--space-1)',
+  			'token-2': 'var(--space-2)',
+  			'token-3': 'var(--space-3)',
+  			'token-4': 'var(--space-4)',
+  			'token-6': 'var(--space-6)'
+  		},
+  		boxShadow: {
+  			'token-sm': 'var(--shadow-sm)',
+  			'token-md': 'var(--shadow-md)',
+  			'token-lg': 'var(--shadow-lg)'
+  		},
+  		transitionDuration: {
+  			fast: 'var(--motion-fast)',
+  			base: 'var(--motion-base)',
+  			slow: 'var(--motion-slow)'
+  		},
   		colors: {
   			background: 'hsl(var(--background))',
   			foreground: 'hsl(var(--foreground))',

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { MapContainer, TileLayer, Polygon, Polyline, Marker, Tooltip as LTooltip, useMapEvents } from "react-leaflet";
 import L from "leaflet";
+import { Button } from "@/components/ui/button";
 
 const vertexIcon = L.divIcon({
   className: "",
@@ -54,12 +55,12 @@ export default function PolygonEditor({
   return (
     <div>
       <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <button type="button" className={`btn sm ${drawMode ? "primary" : ""}`}
+        <Button type="button" variant={drawMode ? "default" : "outline"} size="sm"
           onClick={() => setDrawMode(v => !v)} data-testid="toggle-draw-mode">
           {drawMode ? "✍ Draw mode: ON" : "✍ Draw mode: OFF"}
-        </button>
-        <button type="button" className="btn sm" disabled={points.length === 0} onClick={undo} data-testid="undo-vertex">↶ Undo vertex</button>
-        <button type="button" className="btn sm ghost" disabled={points.length === 0} onClick={clear} data-testid="clear-polygon" style={{ color: "#b91c1c" }}>Clear</button>
+        </Button>
+        <Button type="button" variant="outline" size="sm" disabled={points.length === 0} onClick={undo} data-testid="undo-vertex">↶ Undo vertex</Button>
+        <Button type="button" variant="ghost" size="sm" disabled={points.length === 0} onClick={clear} data-testid="clear-polygon" className="text-destructive hover:text-destructive">Clear</Button>
         <span className="muted" style={{ fontSize: 11.5 }}>
           Vertices: <b>{points.length}</b>{points.length < 3 ? " — add at least 3 to form a polygon" : ""}
         </span>

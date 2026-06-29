@@ -1,0 +1,129 @@
+/**
+ * Design System tokens — single source of truth for the LionCity client.
+ *
+ * Color tokens are bare HSL triples ("H S% L%", no hsl() wrapper) per the
+ * shadcn convention, so Tailwind can wrap them as hsl(var(--token)).
+ * Brand identity: teal (#0d7c78) + deep ink (#0b1e24) + signal red (#d2233c).
+ *
+ * Categories covered (Requirement 1.1 — at least one token each):
+ *   color, typography, spacing, border radius, shadow, motion duration.
+ *
+ * Defined as plain :root / .dark rules (not inside @layer base) so the file
+ * can be @imported standalone without requiring @tailwind base in this file.
+ */
+
+:root {
+  /* ---- Border radius ---- */
+  --radius: 0.625rem;
+
+  /* ---- Color: surfaces & text ---- */
+  --background: 200 33% 96%;      /* #f4f7f9 */
+  --foreground: 197 50% 9%;       /* #0b1e24 ink */
+  --card: 0 0% 100%;
+  --card-foreground: 197 50% 9%;
+  --popover: 197 50% 9%;
+  --popover-foreground: 0 0% 100%;
+
+  /* ---- Color: brand & semantic ---- */
+  --primary: 178 81% 27%;         /* #0d7c78 teal */
+  --primary-foreground: 0 0% 100%;
+  --secondary: 200 24% 96%;
+  --secondary-foreground: 197 50% 9%;
+  --muted: 200 24% 96%;
+  --muted-foreground: 200 9% 40%; /* #5a6a73 */
+  --accent: 178 47% 92%;          /* teal-50 */
+  --accent-foreground: 178 81% 18%;
+  --destructive: 350 73% 48%;     /* #d2233c signal red */
+  --destructive-foreground: 0 0% 100%;
+
+  /* ---- Color: borders, inputs, focus ring ---- */
+  --border: 200 24% 88%;          /* #d9e2e8 */
+  --input: 200 24% 88%;
+  --ring: 178 81% 27%;
+
+  /* ---- Color: chart series ---- */
+  --chart-1: 178 81% 27%;         /* teal */
+  --chart-2: 217 91% 60%;         /* blue */
+  --chart-3: 32 95% 44%;          /* amber */
+  --chart-4: 160 84% 26%;         /* emerald */
+  --chart-5: 350 73% 48%;         /* red */
+
+  /* ---- Typography ---- */
+  --font-sans: 'Inter', 'IBM Plex Sans', system-ui, sans-serif;
+  --font-serif: 'IBM Plex Serif', 'Source Serif Pro', Georgia, serif;
+
+  /* ---- Spacing (4px scale base unit) ---- */
+  --space-1: 0.25rem;             /* 4px */
+  --space-2: 0.5rem;              /* 8px */
+  --space-3: 0.75rem;             /* 12px */
+  --space-4: 1rem;                /* 16px */
+  --space-6: 1.5rem;              /* 24px */
+
+  /* ---- Shadow ---- */
+  --shadow-sm: 0 1px 0 rgba(10, 30, 36, 0.02);
+  --shadow-md: 0 2px 6px rgba(10, 30, 36, 0.12);
+  --shadow-lg: 0 20px 50px rgba(10, 30, 36, 0.15);
+
+  /* ---- Motion duration ---- */
+  --motion-fast: 150ms;
+  --motion-base: 250ms;
+  --motion-slow: 300ms;
+}
+
+.dark {
+  /* ---- Border radius ---- */
+  --radius: 0.625rem;
+
+  /* ---- Color: surfaces & text ---- */
+  --background: 197 45% 8%;
+  --foreground: 180 20% 92%;
+  --card: 197 40% 11%;
+  --card-foreground: 180 20% 92%;
+  --popover: 197 40% 11%;
+  --popover-foreground: 180 20% 92%;
+
+  /* ---- Color: brand & semantic ---- */
+  --primary: 174 62% 47%;         /* brighter teal for dark */
+  --primary-foreground: 197 50% 9%;
+  --secondary: 197 30% 16%;
+  --secondary-foreground: 180 20% 92%;
+  --muted: 197 30% 16%;
+  --muted-foreground: 200 12% 65%;
+  --accent: 197 35% 18%;
+  --accent-foreground: 174 62% 70%;
+  --destructive: 350 80% 60%;
+  --destructive-foreground: 0 0% 100%;
+
+  /* ---- Color: borders, inputs, focus ring ---- */
+  --border: 197 25% 22%;
+  --input: 197 25% 22%;
+  --ring: 174 62% 47%;
+
+  /* ---- Color: chart series ---- */
+  --chart-1: 174 62% 47%;
+  --chart-2: 217 91% 68%;
+  --chart-3: 32 95% 55%;
+  --chart-4: 160 70% 45%;
+  --chart-5: 350 80% 62%;
+
+  /* ---- Typography ---- */
+  --font-sans: 'Inter', 'IBM Plex Sans', system-ui, sans-serif;
+  --font-serif: 'IBM Plex Serif', 'Source Serif Pro', Georgia, serif;
+
+  /* ---- Spacing (4px scale base unit) ---- */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+
+  /* ---- Shadow ---- */
+  --shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.5);
+
+  /* ---- Motion duration ---- */
+  --motion-fast: 150ms;
+  --motion-base: 250ms;
+  --motion-slow: 300ms;
+}

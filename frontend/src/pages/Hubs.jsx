@@ -2,8 +2,16 @@ import React, { useEffect, useState, useCallback } from "react";
 import { http, fmtDate } from "../lib/api";
 import MapView from "../components/MapView";
 import HubPicker from "../components/HubPicker";
-import { Modal, Badge } from "../components/UI";
+import { Modal } from "../components/UI";
 import { useAuth } from "../context/AuthContext";
+import { PageHeader } from "@/components/composite/PageHeader";
+import { DataTable } from "@/components/composite/DataTable";
+import { StatusBadge } from "@/components/composite/StatusBadge";
+import { ErrorState } from "@/components/composite/ErrorState";
+import { ConfirmDialog } from "@/components/composite/ConfirmDialog";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { notifySuccess, notifyError } from "@/lib/notify";
 
 export default function Hubs() {
   const { user } = useAuth();
@@ -12,31 +20,42 @@ export default function Hubs() {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ name: "", address: "", lat: 1.3521, lng: 103.8198, is_default: false, color: "#0d7c78", notes: "" });
   const [geo, setGeo] = useState({ q: "", busy: false, results: [], error: "" });
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState(null);
 
   const isAdmin = user?.role === "super_admin";
 
-  const load = useCallback(async () => { 
-    const r = await http.get("/hubs");
-    let filteredHubs = r.data;
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(false);
+    try {
+      const r = await http.get("/hubs");
+      let filteredHubs = r.data;
 
-    if (user?.role === "hub_manager" && user.reference_id) {
-       const hmRes = await http.get("/hub-managers");
-       const manager = hmRes.data.find(m => m.id === user.reference_id);
-       if (manager && manager.hub_id) {
-         filteredHubs = r.data.filter(h => h.id === manager.hub_id);
-       }
-    } else if (user?.role === "shipper" && user.reference_id) {
-       const drRes = await http.get("/drivers");
-       const driver = drRes.data.find(d => d.id === user.reference_id);
-       if (driver && driver.hub_manager_id) {
+      if (user?.role === "hub_manager" && user.reference_id) {
          const hmRes = await http.get("/hub-managers");
-         const manager = hmRes.data.find(m => m.id === driver.hub_manager_id);
+         const manager = hmRes.data.find(m => m.id === user.reference_id);
          if (manager && manager.hub_id) {
            filteredHubs = r.data.filter(h => h.id === manager.hub_id);
          }
-       }
+      } else if (user?.role === "shipper" && user.reference_id) {
+         const drRes = await http.get("/drivers");
+         const driver = drRes.data.find(d => d.id === user.reference_id);
+         if (driver && driver.hub_manager_id) {
+           const hmRes = await http.get("/hub-managers");
+           const manager = hmRes.data.find(m => m.id === driver.hub_manager_id);
+           if (manager && manager.hub_id) {
+             filteredHubs = r.data.filter(h => h.id === manager.hub_id);
+           }
+         }
+      }
+      setHubs(filteredHubs);
+    } catch (e) {
+      setLoadError(true);
+    } finally {
+      setLoading(false);
     }
-    setHubs(filteredHubs); 
   }, [user]);
 
   useEffect(() => { load(); }, [load]);
@@ -58,18 +77,47 @@ export default function Hubs() {
 
   const save = async () => {
     if (!form.name || !isAdmin) return;
-    if (editing) await http.put(`/hubs/${editing.id}`, form);
-    else await http.post("/hubs", form);
-    setOpen(false); load();
+    const entity = `Hub "${form.name}"`;
+    try {
+      if (editing) await http.put(`/hubs/${editing.id}`, form);
+      else await http.post("/hubs", form);
+      setOpen(false);
+      notifySuccess(editing ? "update" : "create", entity);
+      load();
+    } catch (e) {
+      notifyError(editing ? "update" : "create", entity, e.response?.data?.detail || e.message);
+    }
   };
-  const remove = async (h) => { 
+
+  const remove = (h) => {
     if (!isAdmin) return;
-    if (!window.confirm(`Delete hub "${h.name}"?`)) return; 
-    await http.delete(`/hubs/${h.id}`); load(); 
+    setPendingDelete(h);
   };
-  const makeDefault = async (h) => { 
+
+  const confirmRemove = async () => {
+    const h = pendingDelete;
+    setPendingDelete(null);
+    if (!h) return;
+    const entity = `Hub "${h.name}"`;
+    try {
+      await http.delete(`/hubs/${h.id}`);
+      notifySuccess("delete", entity);
+      load();
+    } catch (e) {
+      notifyError("delete", entity, e.response?.data?.detail || e.message);
+    }
+  };
+
+  const makeDefault = async (h) => {
     if (!isAdmin) return;
-    await http.put(`/hubs/${h.id}`, { ...h, is_default: true }); load(); 
+    const entity = `Hub "${h.name}"`;
+    try {
+      await http.put(`/hubs/${h.id}`, { ...h, is_default: true });
+      notifySuccess("update", entity);
+      load();
+    } catch (e) {
+      notifyError("update", entity, e.response?.data?.detail || e.message);
+    }
   };
 
   const geocode = async () => {
@@ -89,62 +137,114 @@ export default function Hubs() {
     setGeo(g => ({ ...g, results: [] }));
   };
 
+  const columns = [
+    {
+      key: "name",
+      header: "Name",
+      render: (h) => (
+        <div>
+          <div className="flex items-center gap-2">
+            {/* Data-driven hub color from the API stays as an inline style. */}
+            <span
+              aria-hidden="true"
+              className="h-3.5 w-3.5 rounded-[3px] border-2 border-card"
+              style={{
+                background: h.color || "hsl(var(--primary))",
+                boxShadow: `0 0 0 1px ${h.color ? `${h.color}55` : "hsl(var(--primary)/0.35)"}`,
+              }}
+            />
+            <b>{h.name}</b>
+          </div>
+          <div className="text-[11px] text-muted-foreground">{fmtDate(h.created_at)}</div>
+        </div>
+      ),
+    },
+    {
+      key: "address",
+      header: "Address / Coords",
+      render: (h) => (
+        <div className="text-xs">
+          <div>{h.address || <span className="text-muted-foreground">No address</span>}</div>
+          <div className="text-muted-foreground">{h.lat.toFixed(4)}, {h.lng.toFixed(4)}</div>
+        </div>
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      render: (h) => (
+        h.is_default ? (
+          <StatusBadge status="available">Default</StatusBadge>
+        ) : isAdmin ? (
+          <Button variant="ghost" size="sm" onClick={() => makeDefault(h)} data-testid={`set-default-hub-${h.id}`}>Set default</Button>
+        ) : (
+          <span className="text-muted-foreground">Active</span>
+        )
+      ),
+    },
+  ];
+
+  if (isAdmin) {
+    columns.push({
+      key: "actions",
+      header: "",
+      align: "right",
+      render: (h) => (
+        <div className="flex justify-end gap-1">
+          <Button variant="ghost" size="sm" onClick={() => openEdit(h)} data-testid={`edit-hub-${h.id}`}>Edit</Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-destructive hover:text-destructive"
+            onClick={() => remove(h)}
+            data-testid={`del-hub-${h.id}`}
+          >
+            Delete
+          </Button>
+        </div>
+      ),
+    });
+  }
+
   return (
     <div>
-      <div className="page-title"><span className="accent"></span>{isAdmin ? "Hubs Management" : "Assigned Hub"}</div>
+      <PageHeader
+        accent
+        title={isAdmin ? "Hubs Management" : "Assigned Hub"}
+        subtitle={isAdmin ? "Default hub is used by route planning & auto-assignment." : undefined}
+        actions={isAdmin && (
+          <Button data-testid="add-hub-btn" onClick={openNew}>+ Add Hub</Button>
+        )}
+      />
 
-      <div className="toolbar">
-        {isAdmin && <button className="btn primary" data-testid="add-hub-btn" onClick={openNew}>+ Add Hub</button>}
-        {isAdmin && <span className="muted" style={{ fontSize: 12 }}>Default hub is used by route planning & auto-assignment.</span>}
-      </div>
-
-      <div className="section">
-        <div className="card" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-          <div style={{ flex: 1, minHeight: 520 }}>
+      <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_420px]">
+        <Card className="flex flex-col overflow-hidden p-0">
+          <div className="min-h-[520px] flex-1">
             <MapView height="100%" hubs={hubs} />
           </div>
-        </div>
+        </Card>
 
-        <div className="card" style={{ padding: 0, maxHeight: 620, overflow: "auto" }}>
-          <table className="tbl" data-testid="hubs-table">
-            <thead><tr><th>Name</th><th>Address / Coords</th><th>Status</th>{isAdmin && <th></th>}</tr></thead>
-            <tbody>
-              {hubs.map(h => (
-                <tr key={h.id}>
-                  <td>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ width: 14, height: 14, borderRadius: 3, background: h.color || "#0d7c78", border: "2px solid #fff", boxShadow: `0 0 0 1px ${(h.color || "#0d7c78")}55` }}></span>
-                      <b>{h.name}</b>
-                    </div>
-                    <div className="muted" style={{ fontSize: 11 }}>{fmtDate(h.created_at)}</div>
-                  </td>
-                  <td style={{ fontSize: 12 }}>
-                    <div>{h.address || <span className="muted">No address</span>}</div>
-                    <div className="muted">{h.lat.toFixed(4)}, {h.lng.toFixed(4)}</div>
-                  </td>
-                  <td>
-                    {h.is_default ? <Badge tone="ev">Default</Badge> : (
-                      isAdmin ? <button className="btn sm ghost" onClick={() => makeDefault(h)} data-testid={`set-default-hub-${h.id}`}>Set default</button> : "Active"
-                    )}
-                  </td>
-                  {isAdmin && (
-                    <td style={{ textAlign: "right" }}>
-                      <button className="btn sm ghost" onClick={() => openEdit(h)} data-testid={`edit-hub-${h.id}`}>Edit</button>
-                      <button className="btn sm ghost" style={{ color: "#b91c1c" }} onClick={() => remove(h)} data-testid={`del-hub-${h.id}`}>Delete</button>
-                    </td>
-                  )}
-                </tr>
-              ))}
-              {hubs.length === 0 && <tr><td colSpan={isAdmin ? 4 : 3} style={{ padding: 24, textAlign: "center", color: "#64748b" }}>No hubs yet. Add your first hub.</td></tr>}
-            </tbody>
-          </table>
+        <div>
+          {loadError ? (
+            <ErrorState message="Couldn't load hubs. Please try again." onRetry={load} />
+          ) : (
+            <div className="rounded-lg border border-border bg-card" data-testid="hubs-table">
+              <DataTable
+                columns={columns}
+                rows={hubs}
+                rowKey={(h) => h.id}
+                isLoading={loading}
+                emptyMessage="No hubs yet. Add your first hub."
+              />
+            </div>
+          )}
         </div>
       </div>
 
       <Modal open={open} title={editing ? `Edit ${editing.name}` : "New Hub"} onClose={() => setOpen(false)}
         footer={<>
-          <button className="btn" onClick={() => setOpen(false)}>Cancel</button>
-          <button className="btn primary" onClick={save} disabled={!form.name} data-testid="save-hub-btn">{editing ? "Save" : "Create"}</button>
+          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button onClick={save} disabled={!form.name} data-testid="save-hub-btn">{editing ? "Save" : "Create"}</Button>
         </>}>
         <div className="row">
           <div className="field"><label className="label">Hub name</label>
@@ -160,7 +260,7 @@ export default function Hubs() {
                   onClick={() => setForm({ ...form, color: c })}
                   style={{
                     width: 22, height: 22, borderRadius: 6, background: c,
-                    border: form.color === c ? "2px solid #0b1e24" : "1px solid rgba(0,0,0,.15)",
+                    border: form.color === c ? "2px solid hsl(var(--foreground))" : "1px solid hsl(var(--border))",
                     cursor: "pointer", padding: 0,
                   }} />
               ))}
@@ -175,17 +275,17 @@ export default function Hubs() {
           <div style={{ display: "flex", gap: 8 }}>
             <input className="input" data-testid="hub-geocode-q" value={geo.q} onChange={e => setGeo(g => ({ ...g, q: e.target.value }))}
               onKeyDown={e => e.key === "Enter" && geocode()} placeholder="e.g., Marina Bay Sands" />
-            <button type="button" className="btn" disabled={geo.busy || geo.q.length < 3} onClick={geocode} data-testid="hub-geocode-btn">
+            <Button type="button" variant="outline" disabled={geo.busy || geo.q.length < 3} onClick={geocode} data-testid="hub-geocode-btn">
               {geo.busy ? "…" : "Search"}
-            </button>
+            </Button>
           </div>
-          {geo.error && <div style={{ color: "#b91c1c", fontSize: 11.5, marginTop: 6 }}>{geo.error}</div>}
+          {geo.error && <div className="mt-1.5 text-[11.5px] text-destructive">{geo.error}</div>}
           {geo.results.length > 0 && (
-            <div style={{ marginTop: 6, border: "1px solid var(--border)", borderRadius: 8, maxHeight: 140, overflow: "auto" }}>
+            <div className="mt-1.5 max-h-[140px] overflow-auto rounded-lg border border-border">
               {geo.results.map((r, i) => (
-                <div key={i} style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)", fontSize: 12, cursor: "pointer" }}
+                <div key={i} className="cursor-pointer border-b border-border px-2.5 py-2 text-xs"
                   onClick={() => selectGeo(r)} data-testid={`geo-result-${i}`}>
-                  <b>{r.name.split(",")[0]}</b> <span className="muted">{r.name}</span>
+                  <b>{r.name.split(",")[0]}</b> <span className="text-muted-foreground">{r.name}</span>
                 </div>
               ))}
             </div>
@@ -195,7 +295,7 @@ export default function Hubs() {
         <div className="field">
           <label className="label">Location — click the map or drag the pin</label>
           <HubPicker position={[form.lat, form.lng]} color={form.color} onChange={(p) => setForm(f => ({ ...f, lat: p[0], lng: p[1] }))} height={260} />
-          <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+          <div className="mt-1 text-[11px] text-muted-foreground">
             {form.lat.toFixed(5)}, {form.lng.toFixed(5)}
           </div>
         </div>
@@ -208,6 +308,16 @@ export default function Hubs() {
         <div className="field"><label className="label">Notes</label>
           <textarea className="textarea" data-testid="hub-notes" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></div>
       </Modal>
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        destructive
+        title={pendingDelete ? `Delete hub "${pendingDelete.name}"?` : "Delete this hub?"}
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmRemove}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }

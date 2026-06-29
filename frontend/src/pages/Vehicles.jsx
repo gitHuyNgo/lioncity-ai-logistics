@@ -1,7 +1,14 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { http } from "../lib/api";
-import { Modal, Badge } from "../components/UI";
+import { Modal } from "../components/UI";
 import { useAuth } from "../context/AuthContext";
+import { PageHeader } from "@/components/composite/PageHeader";
+import { DataTable } from "@/components/composite/DataTable";
+import { StatusBadge } from "@/components/composite/StatusBadge";
+import { ErrorState } from "@/components/composite/ErrorState";
+import { ConfirmDialog } from "@/components/composite/ConfirmDialog";
+import { Button } from "@/components/ui/button";
+import { notifySuccess, notifyError } from "@/lib/notify";
 
 export default function Vehicles() {
   const { user } = useAuth();
@@ -11,52 +18,105 @@ export default function Vehicles() {
   const [open, setOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(null); // vehicle
   const [assignDriverId, setAssignDriverId] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState(null);
 
   const canMutate = user?.role === "super_admin" || user?.role === "hub_manager";
 
   const load = useCallback(async () => {
-    const [v, d] = await Promise.all([http.get("/vehicles"), http.get("/drivers")]);
-    let filteredVehicles = v.data;
-    let filteredDrivers = d.data;
+    setLoading(true);
+    setLoadError(false);
+    try {
+      const [v, d] = await Promise.all([http.get("/vehicles"), http.get("/drivers")]);
+      let filteredVehicles = v.data;
+      let filteredDrivers = d.data;
 
-    if (user?.role === "hub_manager" && user.reference_id) {
-       const hmRes = await http.get("/hub-managers");
-       const manager = hmRes.data.find(m => m.id === user.reference_id);
-       if (manager) {
-         filteredDrivers = d.data.filter(dr => dr.hub_manager_id === manager.id);
-         const driverIds = filteredDrivers.map(dr => dr.id);
-         filteredVehicles = v.data.filter(veh => driverIds.includes(veh.assigned_driver_id) || !veh.assigned_driver_id);
-       }
-    } else if (user?.role === "shipper" && user.reference_id) {
-       filteredVehicles = v.data.filter(veh => veh.assigned_driver_id === user.reference_id);
-       filteredDrivers = d.data.filter(dr => dr.id === user.reference_id);
+      if (user?.role === "hub_manager" && user.reference_id) {
+        const hmRes = await http.get("/hub-managers");
+        const manager = hmRes.data.find(m => m.id === user.reference_id);
+        if (manager) {
+          filteredDrivers = d.data.filter(dr => dr.hub_manager_id === manager.id);
+          const driverIds = filteredDrivers.map(dr => dr.id);
+          filteredVehicles = v.data.filter(veh => driverIds.includes(veh.assigned_driver_id) || !veh.assigned_driver_id);
+        }
+      } else if (user?.role === "shipper" && user.reference_id) {
+        filteredVehicles = v.data.filter(veh => veh.assigned_driver_id === user.reference_id);
+        filteredDrivers = d.data.filter(dr => dr.id === user.reference_id);
+      }
+
+      setVehicles(filteredVehicles);
+      setDrivers(filteredDrivers);
+    } catch (e) {
+      setLoadError(true);
+    } finally {
+      setLoading(false);
     }
-
-    setVehicles(filteredVehicles); 
-    setDrivers(filteredDrivers);
   }, [user]);
 
   useEffect(() => { load(); }, [load]);
 
   const [assignErr, setAssignErr] = useState("");
 
-  const create = async () => { if (!canMutate) return; await http.post("/vehicles", form); setOpen(false); load(); };
-  const remove = async (id) => { 
+  const create = async () => {
     if (!canMutate) return;
-    if (!window.confirm("Delete this vehicle?")) return; 
-    await http.delete(`/vehicles/${id}`); load(); 
+    const entity = `Vehicle "${form.plate}"`;
+    try {
+      await http.post("/vehicles", form);
+      setOpen(false);
+      notifySuccess("create", entity);
+      load();
+    } catch (e) {
+      notifyError("create", entity, e.response?.data?.detail || e.message);
+    }
   };
+
+  const remove = (v) => {
+    if (!canMutate) return;
+    setPendingDelete(v);
+  };
+
+  const confirmRemove = async () => {
+    const v = pendingDelete;
+    setPendingDelete(null);
+    if (!v) return;
+    const entity = `Vehicle "${v.plate}"`;
+    try {
+      await http.delete(`/vehicles/${v.id}`);
+      notifySuccess("delete", entity);
+      load();
+    } catch (e) {
+      notifyError("delete", entity, e.response?.data?.detail || e.message);
+    }
+  };
+
   const assign = async () => {
     if (!canMutate) return;
+    const entity = `Vehicle "${assignOpen?.plate || ""}"`;
     try {
       setAssignErr("");
       await http.post(`/vehicles/${assignOpen.id}/assign`, { driver_id: assignDriverId });
-      setAssignOpen(null); setAssignDriverId(""); load();
+      setAssignOpen(null); setAssignDriverId("");
+      notifySuccess("update", entity);
+      load();
     } catch (e) {
-      setAssignErr(e.response?.data?.detail || "Error assigning driver");
+      const reason = e.response?.data?.detail || "Error assigning driver";
+      setAssignErr(reason);
+      notifyError("update", entity, reason);
     }
   };
-  const unassign = async (v) => { if (!canMutate) return; await http.post(`/vehicles/${v.id}/unassign`); load(); };
+
+  const unassign = async (v) => {
+    if (!canMutate) return;
+    const entity = `Vehicle "${v.plate}"`;
+    try {
+      await http.post(`/vehicles/${v.id}/unassign`);
+      notifySuccess("update", entity);
+      load();
+    } catch (e) {
+      notifyError("update", entity, e.response?.data?.detail || e.message);
+    }
+  };
 
   const dById = Object.fromEntries(drivers.map(d => [d.id, d]));
 
@@ -66,58 +126,88 @@ export default function Vehicles() {
     ? drivers.filter(d => allowedLicenses(assignOpen.type).includes(d.license_type))
     : [];
 
+  const columns = [
+    { key: "plate", header: "Plate", render: (v) => <span className="font-semibold">{v.plate}</span> },
+    { key: "type", header: "Type", render: (v) => <span className="capitalize">{v.type}</span> },
+    { key: "fuel_type", header: "Fuel", render: (v) => <StatusBadge status={v.fuel_type} /> },
+    { key: "capacity_kg", header: "Capacity", align: "right", render: (v) => `${v.capacity_kg} kg` },
+    {
+      key: "assigned_driver",
+      header: "Assigned Driver",
+      render: (v) => {
+        const drv = v.assigned_driver_id ? dById[v.assigned_driver_id] : null;
+        return drv ? (
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[12.5px] font-semibold">{drv.name}</span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground">{drv.phone}</span>
+              <StatusBadge status={drv.status} />
+              <span className="text-[11px] text-muted-foreground">· License {drv.license_type}</span>
+            </div>
+          </div>
+        ) : (
+          <span className="text-muted-foreground">Unassigned</span>
+        );
+      },
+    },
+  ];
+
+  if (canMutate) {
+    columns.push({
+      key: "actions",
+      header: "",
+      align: "right",
+      render: (v) => (
+        <div className="flex justify-end gap-1">
+          {!v.assigned_driver_id ? (
+            <Button variant="secondary" size="sm" onClick={() => { setAssignOpen(v); setAssignDriverId(""); }} data-testid={`assign-vehicle-${v.id}`}>Assign</Button>
+          ) : (
+            <Button variant="ghost" size="sm" onClick={() => unassign(v)} data-testid={`unassign-vehicle-${v.id}`}>Unassign</Button>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-destructive hover:text-destructive"
+            onClick={() => remove(v)}
+            data-testid={`del-vehicle-${v.id}`}
+          >
+            Delete
+          </Button>
+        </div>
+      ),
+    });
+  }
+
   return (
     <div>
-      <div className="page-title"><span className="accent"></span>{user?.role === "shipper" ? "My Vehicle" : "Fleet Management"}</div>
+      <PageHeader
+        accent
+        title={user?.role === "shipper" ? "My Vehicle" : "Fleet Management"}
+        actions={canMutate && (
+          <Button data-testid="add-vehicle-btn" onClick={() => { setForm({ plate: "", type: "van", fuel_type: "ev", capacity_kg: 500 }); setOpen(true); }}>+ Add Vehicle</Button>
+        )}
+      />
 
-      <div className="toolbar">
-        {canMutate && <button className="btn primary" data-testid="add-vehicle-btn" onClick={() => { setForm({ plate: "", type: "van", fuel_type: "ev", capacity_kg: 500 }); setOpen(true); }}>+ Add Vehicle</button>}
-      </div>
-
-      <div className="card" style={{ padding: 0 }}>
-        <table className="tbl" data-testid="vehicles-table">
-          <thead><tr><th>Plate</th><th>Type</th><th>Fuel</th><th>Capacity</th><th>Assigned Driver</th>{canMutate && <th></th>}</tr></thead>
-          <tbody>
-            {vehicles.map(v => {
-              const drv = v.assigned_driver_id ? dById[v.assigned_driver_id] : null;
-              return (
-                <tr key={v.id}>
-                  <td style={{ fontWeight: 600 }}>{v.plate}</td>
-                  <td style={{ textTransform: "capitalize" }}>{v.type}</td>
-                  <td><Badge tone={v.fuel_type}>{v.fuel_type.toUpperCase()}</Badge></td>
-                  <td>{v.capacity_kg} kg</td>
-                  <td>
-                    {drv ? (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                        <span style={{ fontWeight: 600, fontSize: 12.5 }}>{drv.name}</span>
-                        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                          <span className="muted" style={{ fontSize: 11 }}>{drv.phone}</span>
-                          <Badge tone={drv.status}>{drv.status}</Badge>
-                          <span className="muted" style={{ fontSize: 11 }}>· License {drv.license_type}</span>
-                        </div>
-                      </div>
-                    ) : <span className="muted">Unassigned</span>}
-                  </td>
-                  {canMutate && (
-                    <td style={{ textAlign: "right" }}>
-                      {!v.assigned_driver_id
-                        ? <button className="btn sm" onClick={() => { setAssignOpen(v); setAssignDriverId(""); }} data-testid={`assign-vehicle-${v.id}`}>Assign</button>
-                        : <button className="btn sm ghost" onClick={() => unassign(v)} data-testid={`unassign-vehicle-${v.id}`}>Unassign</button>}
-                      <button className="btn sm ghost" style={{ color: "#b91c1c" }} onClick={() => remove(v.id)} data-testid={`del-vehicle-${v.id}`}>Delete</button>
-                    </td>
-                  )}
-                </tr>
-              );
-            })}
-            {vehicles.length === 0 && <tr><td colSpan={canMutate ? 6 : 5} style={{ padding: 24, textAlign: "center", color: "#64748b" }}>{user?.role === "shipper" ? "No vehicle assigned yet." : "No vehicles."}</td></tr>}
-          </tbody>
-        </table>
+      <div className="mt-4">
+        {loadError ? (
+          <ErrorState message="Couldn't load vehicles. Please try again." onRetry={load} />
+        ) : (
+          <div className="rounded-lg border border-border bg-card" data-testid="vehicles-table">
+            <DataTable
+              columns={columns}
+              rows={vehicles}
+              rowKey={(v) => v.id}
+              isLoading={loading}
+              emptyMessage={user?.role === "shipper" ? "No vehicle assigned yet." : "No vehicles."}
+            />
+          </div>
+        )}
       </div>
 
       <Modal open={open} title="New Vehicle" onClose={() => setOpen(false)}
         footer={<>
-          <button className="btn" onClick={() => setOpen(false)}>Cancel</button>
-          <button className="btn primary" onClick={create} data-testid="save-vehicle-btn">Create</button>
+          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button onClick={create} data-testid="save-vehicle-btn">Create</Button>
         </>}>
         <div className="field"><label className="label">Plate</label>
           <input className="input" data-testid="veh-plate" value={form.plate} onChange={e => setForm({ ...form, plate: e.target.value })} /></div>
@@ -140,8 +230,8 @@ export default function Vehicles() {
 
       <Modal open={!!assignOpen} title={`Assign ${assignOpen?.plate || ""}`} onClose={() => { setAssignOpen(null); setAssignErr(""); }}
         footer={<>
-          <button className="btn" onClick={() => { setAssignOpen(null); setAssignErr(""); }}>Cancel</button>
-          <button className="btn primary" disabled={!assignDriverId} onClick={assign} data-testid="confirm-assign-vehicle-btn">Assign</button>
+          <Button variant="outline" onClick={() => { setAssignOpen(null); setAssignErr(""); }}>Cancel</Button>
+          <Button disabled={!assignDriverId} onClick={assign} data-testid="confirm-assign-vehicle-btn">Assign</Button>
         </>}>
         <div className="field">
           <label className="label">Driver</label>
@@ -158,13 +248,23 @@ export default function Vehicles() {
             ))}
           </select>
           {eligibleDrivers.length === 0 && (
-            <div className="muted" style={{ fontSize: 12, marginTop: 6, color: "#b91c1c" }}>
+            <div className="mt-1.5 text-xs text-destructive">
               No drivers with a compatible license available.
             </div>
           )}
-          {assignErr && <div style={{ color: "#b91c1c", fontSize: 12, marginTop: 6 }} data-testid="assign-err">{assignErr}</div>}
+          {assignErr && <div className="mt-1.5 text-xs text-destructive" data-testid="assign-err">{assignErr}</div>}
         </div>
       </Modal>
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        destructive
+        title={pendingDelete ? `Delete vehicle "${pendingDelete.plate}"?` : "Delete this vehicle?"}
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmRemove}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }
